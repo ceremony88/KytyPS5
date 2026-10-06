@@ -173,15 +173,13 @@ index 6546eed3..28f0aafb 100644
  		};
 -		if (const auto result = g_api.set_tag_for_frame(token, viewport, tags, partial ? 3u : 2u, nullptr);
 -		    result != sl::Result::eOk && g_presents < 8) {
--			LOGF("frame generation: slSetTagForFrame failed (%d)
-", static_cast<int>(result));
+-			LOGF("frame generation: slSetTagForFrame failed (%d)\n", static_cast<int>(result));
 +		const auto result = g_api.set_tag_for_frame(token, viewport, tags, partial ? 3u : 2u, nullptr);
 +		++g_tag_frames_valid;
 +		if (result != sl::Result::eOk) {
 +			++g_tag_failures;
 +			if (g_presents < 8) {
-+				LOGF("frame generation: slSetTagForFrame failed (%d)
-", static_cast<int>(result));
++				LOGF("frame generation: slSetTagForFrame failed (%d)\n", static_cast<int>(result));
 +			}
  		}
  	} else {
@@ -270,16 +268,14 @@ index 6546eed3..28f0aafb 100644
 +		LOGF("Frame generation sample: guest_frames=%" PRIu64 "..%" PRIu64
 +		     " presents=%" PRIu64 " valid=%" PRIu64 " no_taa=%" PRIu64 " no_camera=%" PRIu64
 +		     " replaced=%" PRIu64 " no_frame=%" PRIu64 " generated=%" PRIu64
-+		     " streamline_presented=%" PRIu64 " state_failures=%" PRIu64 "
-",
++		     " streamline_presented=%" PRIu64 " state_failures=%" PRIu64 "\n",
 +		     first_guest_frame, last_guest_frame, sample_presents, sample_valid, sample_no_taa,
 +		     sample_no_camera, sample_replaced, sample_no_frame, sample_generated,
 +		     sample_sl_presented, sample_state_failures);
 +		std::printf("Frame generation sample: guest_frames=%" PRIu64 "..%" PRIu64
 +		            " presents=%" PRIu64 " valid=%" PRIu64 " no_taa=%" PRIu64 " no_camera=%" PRIu64
 +		            " replaced=%" PRIu64 " no_frame=%" PRIu64 " generated=%" PRIu64
-+		            " streamline_presented=%" PRIu64 " state_failures=%" PRIu64 "
-",
++		            " streamline_presented=%" PRIu64 " state_failures=%" PRIu64 "\n",
 +		            first_guest_frame, last_guest_frame, sample_presents, sample_valid, sample_no_taa,
 +		            sample_no_camera, sample_replaced, sample_no_frame, sample_generated,
 +		            sample_sl_presented, sample_state_failures);
@@ -299,47 +295,39 @@ index 6546eed3..28f0aafb 100644
  	}
 -	g_presented_frames.store(std::max(state.numFramesActuallyPresented, 1u), std::memory_order_relaxed);
  	if (presents % 600 == 1) {
- 		LOGF("frame generation: status=0x%x presented=%u max_generated=%u vram=%" PRIu64 " MiB
-",
+ 		LOGF("frame generation: status=0x%x presented=%u max_generated=%u vram=%" PRIu64 " MiB\n",
  		     static_cast<uint32_t>(state.status), state.numFramesActuallyPresented,
 @@ -715,12 +836,44 @@ void AfterPresent() {
- 		std::printf("Frame generation: status=0x%x presented=%u max_generated=%u
-",
+ 		std::printf("Frame generation: status=0x%x presented=%u max_generated=%u\n",
  		            static_cast<uint32_t>(state.status), state.numFramesActuallyPresented,
  		            state.numFramesToGenerateMax);
 +		LOGF("frame generation inputs: valid=%" PRIu64 " no_frame=%" PRIu64 " no_taa=%" PRIu64
-+		     " no_camera=%" PRIu64 " replaced=%" PRIu64 " state_failures=%" PRIu64 "
-",
++		     " no_camera=%" PRIu64 " replaced=%" PRIu64 " state_failures=%" PRIu64 "\n",
 +		     g_input_frames_valid, g_input_frames_no_frame, g_input_frames_no_taa,
 +		     g_input_frames_no_camera, g_input_frames_replaced, g_state_query_failures);
 +		std::printf("Frame generation inputs: valid=%" PRIu64 " no_frame=%" PRIu64 " no_taa=%" PRIu64
-+		            " no_camera=%" PRIu64 " replaced=%" PRIu64 " state_failures=%" PRIu64 "
-",
++		            " no_camera=%" PRIu64 " replaced=%" PRIu64 " state_failures=%" PRIu64 "\n",
 +		            g_input_frames_valid, g_input_frames_no_frame, g_input_frames_no_taa,
 +		            g_input_frames_no_camera, g_input_frames_replaced, g_state_query_failures);
 +		LOGF("Frame generation camera: draws=%" PRIu64 " shader_matches=%" PRIu64
-+		     " srt_too_short=%" PRIu64 " captures=%" PRIu64 "
-",
++		     " srt_too_short=%" PRIu64 " captures=%" PRIu64 "\n",
 +		     g_camera_draws.load(std::memory_order_relaxed),
 +		     g_camera_shader_matches.load(std::memory_order_relaxed),
 +		     g_camera_srt_too_short.load(std::memory_order_relaxed),
 +		     g_camera_captures.load(std::memory_order_relaxed));
 +		std::printf("Frame generation camera: draws=%" PRIu64 " shader_matches=%" PRIu64
-+		            " srt_too_short=%" PRIu64 " captures=%" PRIu64 "
-",
++		            " srt_too_short=%" PRIu64 " captures=%" PRIu64 "\n",
 +		            g_camera_draws.load(std::memory_order_relaxed),
 +		            g_camera_shader_matches.load(std::memory_order_relaxed),
 +		            g_camera_srt_too_short.load(std::memory_order_relaxed),
 +		            g_camera_captures.load(std::memory_order_relaxed));
 +		LOGF("Frame generation tags: valid=%" PRIu64 " missing_inputs=%" PRIu64
-+		     " failures=%" PRIu64 "
-",
++		     " failures=%" PRIu64 "\n",
 +		     g_tag_frames_valid.load(std::memory_order_relaxed),
 +		     g_tag_frames_missing.load(std::memory_order_relaxed),
 +		     g_tag_failures.load(std::memory_order_relaxed));
 +		std::printf("Frame generation tags: valid=%" PRIu64 " missing_inputs=%" PRIu64
-+		            " failures=%" PRIu64 "
-",
++		            " failures=%" PRIu64 "\n",
 +		            g_tag_frames_valid.load(std::memory_order_relaxed),
 +		            g_tag_frames_missing.load(std::memory_order_relaxed),
 +		            g_tag_failures.load(std::memory_order_relaxed));
