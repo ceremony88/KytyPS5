@@ -30,8 +30,8 @@ index 29920edd..2d4384f4 100644
 +			const double game = hud_frames / seconds;
 +			const uint64_t presented_total = FrameGen::PresentedFrameCount();
 +			const uint64_t presented_delta = presented_total >= hud_presented_frames
-+				                                     ? presented_total - hud_presented_frames
-+				                                     : 0;
++			                                     ? presented_total - hud_presented_frames
++			                                     : 0;
 +			const double displayed = FrameGen::Enabled() ? presented_delta / seconds : game;
 +			const double generated = std::max(0.0, displayed - game);
  			std::array<char, 32>  title {};
@@ -45,7 +45,7 @@ index 29920edd..2d4384f4 100644
 +				std::snprintf(detail.data(), detail.size(), "game %.0f fps  |  generated %.0f fps", game, generated);
  			} else {
  				std::snprintf(detail.data(), detail.size(), "game %.0f fps", game);
- 		}
+ 			}
 @@ -433,6 +438,7 @@ struct Presenter::Impl {
  			hud.detail = detail.data();
  			hud_window = now;
@@ -80,9 +80,6 @@ index 29920edd..2d4384f4 100644
  		}
  		if (status != Swapchain::Status::Success) {
  			m_impl->RecoverSwapchain(status);
- 		}
- 	}
- }
 diff --git a/src/local/frame-gen.cpp b/src/local/frame-gen.cpp
 index 6546eed3..28f0aafb 100644
 --- a/src/local/frame-gen.cpp
@@ -149,7 +146,7 @@ index 6546eed3..28f0aafb 100644
  	}
  	const auto interposer = dir / "sl.interposer.dll";
  	if (std::getenv("KYTY_FRAMEGEN_VERBOSE") != nullptr) {
-@@ -525,6 +553,18 @@ void BeforePresent(const FrameInputs* inputs, vk::Extent2D backbuffer, vk::Rect2D region,
+@@ -525,6 +553,18 @@ void BeforePresent(const FrameInputs* inputs, vk::Extent2D backbuffer, vk::Rect2
  	}
  	const sl::ViewportHandle viewport {0};
  	const bool               usable = inputs != nullptr && inputs->valid;
@@ -168,7 +165,7 @@ index 6546eed3..28f0aafb 100644
  	// DLSS-G options: on while frames carry inputs; sizes are hints for its allocations.
  	if (!g_options_set || (usable && (g_options_backbuffer != backbuffer ||
  	                                  g_options_render != inputs->render_extent))) {
-@@ -670,9 +710,13 @@ void BeforePresent(const FrameInputs* inputs, vk::Extent2D backbuffer, vk::Rect2D region,
+@@ -670,9 +710,13 @@ void BeforePresent(const FrameInputs* inputs, vk::Extent2D backbuffer, vk::Rect2
  		    sl::ResourceTag(nullptr, sl::kBufferTypeBackbuffer, sl::ResourceLifecycle::eValidUntilPresent,
  		                    &game),
  		};
@@ -184,7 +181,9 @@ index 6546eed3..28f0aafb 100644
 +			}
  		}
  	} else {
-@@ -680,7 +724,12 @@ void BeforePresent(const FrameInputs* inputs, vk::Extent2D backbuffer, vk::Rect2D region,
+ 		// Menus, movies, loading: no valid depth and motion (DLSS-G then presents the frame as is).
+@@ -680,7 +724,12 @@ void BeforePresent(const FrameInputs* inputs, vk::Extent2D backbuffer, vk::Rect2
+ 		    sl::ResourceTag(nullptr, sl::kBufferTypeDepth, sl::ResourceLifecycle::eValidUntilPresent),
  		    sl::ResourceTag(nullptr, sl::kBufferTypeMotionVectors, sl::ResourceLifecycle::eValidUntilPresent),
  		};
 -		g_api.set_tag_for_frame(token, viewport, tags, static_cast<uint32_t>(std::size(tags)), nullptr);
@@ -197,8 +196,7 @@ index 6546eed3..28f0aafb 100644
  	}
  	g_api.pcl_set_marker(sl::PCLMarker::eRenderSubmitEnd, token);
  	g_api.pcl_set_marker(sl::PCLMarker::ePresentStart, token);
-@@ -693,21 +742,93 @@ void BeforePresent(const FrameInputs* inputs, vk::Extent2D backbuffer, vk::Rect2D region,
- 	(void)image_count;
+@@ -693,21 +742,93 @@ void BeforePresent(const FrameInputs* inputs, vk::Extent2D backbuffer, vk::Rect2
  #endif
  }
  
@@ -334,10 +332,16 @@ index 6546eed3..28f0aafb 100644
 +		            g_tag_failures.load(std::memory_order_relaxed));
  		std::fflush(stdout);
  	}
- #else
++#else
 +	(void)inputs;
  #endif
  }
+ 
+-uint32_t PresentedFrames() {
++uint64_t PresentedFrameCount() {
+ 	return g_presented_frames.load(std::memory_order_relaxed);
+ }
+ 
 @@ -732,9 +885,17 @@ void SetStaticRect(float x0, float y0, float x1, float y1) {
  }
  
@@ -358,13 +362,18 @@ index 6546eed3..28f0aafb 100644
 +	if (g_camera.valid) {
  		return;
  	}
+ 	for (uint32_t i = 0; i < 16; ++i) {
 @@ -749,6 +910,7 @@ void OnDraw(uint64_t vs_hash, std::span<const uint32_t> srt) {
  	}
  	g_camera.jitter_ndc = {AsFloat(srt[SrtJitter]), AsFloat(srt[SrtJitter + 1])};
  	g_camera.valid      = true;
 +	g_camera_captures.fetch_add(1, std::memory_order_relaxed);
  }
-@@ -762,13 +924,22 @@ void PrepareInputs(GraphicContext& graphics, TextureCache& cache, CommandBuffer& command,
+ 
+ void OnDispatch(uint64_t cs_hash, ImageId depth, uint64_t depth_address, ImageId motion,
+@@ -762,13 +924,20 @@ void OnDispatch(uint64_t cs_hash, ImageId depth, uint64_t depth_address, ImageId
+ void PrepareInputs(GraphicContext& graphics, TextureCache& cache, CommandBuffer& command,
+                    FrameInputs& inputs) {
  	inputs.valid = false;
 -	const bool ready = g_sources.valid && g_camera.valid;
 +	inputs.issue = InputIssue::MissingTaa;
@@ -383,14 +392,16 @@ index 6546eed3..28f0aafb 100644
 +		}
  		return;
  	}
-@@ -777,6 +948,7 @@ void PrepareInputs(GraphicContext& graphics, TextureCache& cache, CommandBuffer& command,
+ 	auto& depth  = cache.GetImage(sources.depth);
+@@ -777,6 +946,7 @@ void PrepareInputs(GraphicContext& graphics, TextureCache& cache, CommandBuffer&
  	    motion.info.data.address != sources.motion_address ||
  	    depth.backing.extent.width != motion.backing.extent.width ||
  	    depth.backing.extent.height != motion.backing.extent.height) {
 +		inputs.issue = InputIssue::ReplacedImages;
  		return; // the images were replaced after the TAA pass
  	}
-@@ -790,8 +961,9 @@ void PrepareInputs(GraphicContext& graphics, TextureCache& cache, CommandBuffer& command,
+ 	Configure(graphics, inputs.depth, inputs.depth_view, depth.backing);
+@@ -790,8 +960,8 @@ void PrepareInputs(GraphicContext& graphics, TextureCache& cache, CommandBuffer&
  	}
  	inputs.render_extent = {motion.backing.extent.width, motion.backing.extent.height};
  	inputs.camera        = camera;
@@ -398,6 +409,8 @@ index 6546eed3..28f0aafb 100644
  	inputs.valid         = true;
 +	inputs.issue         = InputIssue::None;
  }
+ 
+ void DestroyInputs(GraphicContext& graphics, FrameInputs& inputs) {
 diff --git a/src/local/frame-gen.h b/src/local/frame-gen.h
 index 5fea5290..b4adb310 100644
 --- a/src/local/frame-gen.h
@@ -410,12 +423,15 @@ index 5fea5290..b4adb310 100644
 +
  // One presented frame's inputs, owned by the presenter's frame.
  struct FrameInputs {
+ 	VulkanImage   depth, motion;
 @@ -43,6 +45,7 @@ struct FrameInputs {
  	uint64_t      guest_frame = 0;
  	bool          motion_attachment = false; // the motion copy is a color attachment too
  	bool          valid       = false;
 +	InputIssue    issue       = InputIssue::MissingTaa;
  };
+ 
+ // Process start, before the window: loads Streamline when KYTY_FRAMEGEN is set (it then becomes
 @@ -64,10 +67,10 @@ void BypassCommandHooks(vk::Device device);
  // game image covers.
  void BeforePresent(const FrameInputs* inputs, vk::Extent2D backbuffer, vk::Rect2D region,
@@ -431,9 +447,3 @@ index 5fea5290..b4adb310 100644
  // KYTY_FPS_HUD: the panel's rectangle, normalized to the game image. Its motion vectors are
  // zeroed so generated frames keep the panel in place.
  void SetStaticRect(float x0, float y0, float x1, float y1);
-@@ -75,3 +78,4 @@ void OnDispatch(uint64_t cs_hash, ImageId depth, uint64_t depth_address, ImageId motion,
- void DestroyInputs(GraphicContext& graphics, FrameInputs& inputs);
- 
- } // namespace FrameGen
--} // namespace Graphics
-+} // namespace Graphics
