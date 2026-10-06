@@ -72,7 +72,7 @@ index 29920edd..101a7602 100644
  			                        swapchain.ImageCount());
  		}
 diff --git a/src/local/frame-gen.cpp b/src/local/frame-gen.cpp
-index 6546eed3..4920067e 100644
+index 6546eed3..bc0ccdd2 100644
 --- a/src/local/frame-gen.cpp
 +++ b/src/local/frame-gen.cpp
 @@ -154,7 +154,7 @@ void CopyInto(vk::CommandBuffer command, Image& source, VulkanImage& target) {
@@ -84,7 +84,7 @@ index 6546eed3..4920067e 100644
  std::atomic<uint64_t> g_static_rect {0};
  
  // No motion under the KYTY_FPS_HUD panel: DLSS-G would move it with the scene behind it.
-@@ -219,6 +219,12 @@ bool             g_options_set = false;
+@@ -219,6 +219,19 @@ bool             g_options_set = false;
  vk::Extent2D     g_options_backbuffer {};
  vk::Extent2D     g_options_render {};
  uint64_t         g_presents = 0;
@@ -94,10 +94,17 @@ index 6546eed3..4920067e 100644
 +uint64_t         g_input_frames_no_camera = 0;
 +uint64_t         g_input_frames_replaced = 0;
 +uint64_t         g_state_query_failures = 0;
++std::atomic<uint64_t> g_camera_draws {0};
++std::atomic<uint64_t> g_camera_shader_matches {0};
++std::atomic<uint64_t> g_camera_srt_too_short {0};
++std::atomic<uint64_t> g_camera_captures {0};
++std::atomic<uint64_t> g_tag_frames_valid {0};
++std::atomic<uint64_t> g_tag_frames_missing {0};
++std::atomic<uint64_t> g_tag_failures {0};
  
  // Matrices in Streamline's convention: row-major, row vectors (p' = p * M).
  using Mat4 = sl::float4x4;
-@@ -404,8 +410,22 @@ void Initialize() {
+@@ -404,8 +417,22 @@ void Initialize() {
  	} else {
  		wchar_t exe[MAX_PATH] {};
  		GetModuleFileNameW(nullptr, exe, MAX_PATH);
@@ -122,7 +129,7 @@ index 6546eed3..4920067e 100644
  	}
  	const auto interposer = dir / "sl.interposer.dll";
  	if (std::getenv("KYTY_FRAMEGEN_VERBOSE") != nullptr) {
-@@ -525,6 +545,18 @@ void BeforePresent(const FrameInputs* inputs, vk::Extent2D backbuffer, vk::Rect2
+@@ -525,6 +552,18 @@ void BeforePresent(const FrameInputs* inputs, vk::Extent2D backbuffer, vk::Rect2
  	}
  	const sl::ViewportHandle viewport {0};
  	const bool               usable = inputs != nullptr && inputs->valid;
@@ -141,7 +148,38 @@ index 6546eed3..4920067e 100644
  	// DLSS-G options: on while frames carry inputs; sizes are hints for its allocations.
  	if (!g_options_set || (usable && (g_options_backbuffer != backbuffer ||
  	                                  g_options_render != inputs->render_extent))) {
-@@ -700,14 +732,17 @@ void AfterPresent() {
+@@ -670,9 +709,13 @@ void BeforePresent(const FrameInputs* inputs, vk::Extent2D backbuffer, vk::Rect2
+ 		    sl::ResourceTag(nullptr, sl::kBufferTypeBackbuffer, sl::ResourceLifecycle::eValidUntilPresent,
+ 		                    &game),
+ 		};
+-		if (const auto result = g_api.set_tag_for_frame(token, viewport, tags, partial ? 3u : 2u, nullptr);
+-		    result != sl::Result::eOk && g_presents < 8) {
+-			LOGF("frame generation: slSetTagForFrame failed (%d)\n", static_cast<int>(result));
++		const auto result = g_api.set_tag_for_frame(token, viewport, tags, partial ? 3u : 2u, nullptr);
++		++g_tag_frames_valid;
++		if (result != sl::Result::eOk) {
++			++g_tag_failures;
++			if (g_presents < 8) {
++				LOGF("frame generation: slSetTagForFrame failed (%d)\n", static_cast<int>(result));
++			}
+ 		}
+ 	} else {
+ 		// Menus, movies, loading: no valid depth and motion (DLSS-G then presents the frame as is).
+@@ -680,7 +723,12 @@ void BeforePresent(const FrameInputs* inputs, vk::Extent2D backbuffer, vk::Rect2
+ 		    sl::ResourceTag(nullptr, sl::kBufferTypeDepth, sl::ResourceLifecycle::eValidUntilPresent),
+ 		    sl::ResourceTag(nullptr, sl::kBufferTypeMotionVectors, sl::ResourceLifecycle::eValidUntilPresent),
+ 		};
+-		g_api.set_tag_for_frame(token, viewport, tags, static_cast<uint32_t>(std::size(tags)), nullptr);
++		const auto result = g_api.set_tag_for_frame(token, viewport, tags,
++		                                            static_cast<uint32_t>(std::size(tags)), nullptr);
++		++g_tag_frames_missing;
++		if (result != sl::Result::eOk) {
++			++g_tag_failures;
++		}
+ 	}
+ 	g_api.pcl_set_marker(sl::PCLMarker::eRenderSubmitEnd, token);
+ 	g_api.pcl_set_marker(sl::PCLMarker::ePresentStart, token);
+@@ -700,14 +748,17 @@ void AfterPresent() {
  	}
  	g_api.pcl_set_marker(sl::PCLMarker::ePresentEnd, *g_token);
  	const auto presents = ++g_presents;
@@ -164,7 +202,7 @@ index 6546eed3..4920067e 100644
  	if (presents % 600 == 1) {
  		LOGF("frame generation: status=0x%x presented=%u max_generated=%u vram=%" PRIu64 " MiB\n",
  		     static_cast<uint32_t>(state.status), state.numFramesActuallyPresented,
-@@ -715,12 +750,20 @@ void AfterPresent() {
+@@ -715,12 +766,42 @@ void AfterPresent() {
  		std::printf("Frame generation: status=0x%x presented=%u max_generated=%u\n",
  		            static_cast<uint32_t>(state.status), state.numFramesActuallyPresented,
  		            state.numFramesToGenerateMax);
@@ -176,6 +214,28 @@ index 6546eed3..4920067e 100644
 +		            " no_camera=%" PRIu64 " replaced=%" PRIu64 " state_failures=%" PRIu64 "\n",
 +		            g_input_frames_valid, g_input_frames_no_frame, g_input_frames_no_taa,
 +		            g_input_frames_no_camera, g_input_frames_replaced, g_state_query_failures);
++		LOGF("Frame generation camera: draws=%" PRIu64 " shader_matches=%" PRIu64
++		     " srt_too_short=%" PRIu64 " captures=%" PRIu64 "\n",
++		     g_camera_draws.load(std::memory_order_relaxed),
++		     g_camera_shader_matches.load(std::memory_order_relaxed),
++		     g_camera_srt_too_short.load(std::memory_order_relaxed),
++		     g_camera_captures.load(std::memory_order_relaxed));
++		std::printf("Frame generation camera: draws=%" PRIu64 " shader_matches=%" PRIu64
++		            " srt_too_short=%" PRIu64 " captures=%" PRIu64 "\n",
++		            g_camera_draws.load(std::memory_order_relaxed),
++		            g_camera_shader_matches.load(std::memory_order_relaxed),
++		            g_camera_srt_too_short.load(std::memory_order_relaxed),
++		            g_camera_captures.load(std::memory_order_relaxed));
++		LOGF("Frame generation tags: valid=%" PRIu64 " missing_inputs=%" PRIu64
++		     " failures=%" PRIu64 "\n",
++		     g_tag_frames_valid.load(std::memory_order_relaxed),
++		     g_tag_frames_missing.load(std::memory_order_relaxed),
++		     g_tag_failures.load(std::memory_order_relaxed));
++		std::printf("Frame generation tags: valid=%" PRIu64 " missing_inputs=%" PRIu64
++		            " failures=%" PRIu64 "\n",
++		            g_tag_frames_valid.load(std::memory_order_relaxed),
++		            g_tag_frames_missing.load(std::memory_order_relaxed),
++		            g_tag_failures.load(std::memory_order_relaxed));
  		std::fflush(stdout);
  	}
  #endif
@@ -186,7 +246,36 @@ index 6546eed3..4920067e 100644
  	return g_presented_frames.load(std::memory_order_relaxed);
  }
  
-@@ -762,13 +805,19 @@ void OnDispatch(uint64_t cs_hash, ImageId depth, uint64_t depth_address, ImageId
+@@ -732,9 +813,17 @@ void SetStaticRect(float x0, float y0, float x1, float y1) {
+ }
+ 
+ void OnDraw(uint64_t vs_hash, std::span<const uint32_t> srt) {
+-	if (g_camera.valid || srt.size() < SrtJitter + 2 ||
+-	    std::find(GbufferVertexShaders.begin(), GbufferVertexShaders.end(), vs_hash) ==
+-	        GbufferVertexShaders.end()) {
++	g_camera_draws.fetch_add(1, std::memory_order_relaxed);
++	if (std::find(GbufferVertexShaders.begin(), GbufferVertexShaders.end(), vs_hash) ==
++	    GbufferVertexShaders.end()) {
++		return;
++	}
++	g_camera_shader_matches.fetch_add(1, std::memory_order_relaxed);
++	if (srt.size() < SrtJitter + 2) {
++		g_camera_srt_too_short.fetch_add(1, std::memory_order_relaxed);
++		return;
++	}
++	if (g_camera.valid) {
+ 		return;
+ 	}
+ 	for (uint32_t i = 0; i < 16; ++i) {
+@@ -749,6 +838,7 @@ void OnDraw(uint64_t vs_hash, std::span<const uint32_t> srt) {
+ 	}
+ 	g_camera.jitter_ndc = {AsFloat(srt[SrtJitter]), AsFloat(srt[SrtJitter + 1])};
+ 	g_camera.valid      = true;
++	g_camera_captures.fetch_add(1, std::memory_order_relaxed);
+ }
+ 
+ void OnDispatch(uint64_t cs_hash, ImageId depth, uint64_t depth_address, ImageId motion,
+@@ -762,13 +852,19 @@ void OnDispatch(uint64_t cs_hash, ImageId depth, uint64_t depth_address, ImageId
  void PrepareInputs(GraphicContext& graphics, TextureCache& cache, CommandBuffer& command,
                     FrameInputs& inputs) {
  	inputs.valid = false;
@@ -207,7 +296,7 @@ index 6546eed3..4920067e 100644
  		return;
  	}
  	auto& depth  = cache.GetImage(sources.depth);
-@@ -777,6 +826,7 @@ void PrepareInputs(GraphicContext& graphics, TextureCache& cache, CommandBuffer&
+@@ -777,6 +873,7 @@ void PrepareInputs(GraphicContext& graphics, TextureCache& cache, CommandBuffer&
  	    motion.info.data.address != sources.motion_address ||
  	    depth.backing.extent.width != motion.backing.extent.width ||
  	    depth.backing.extent.height != motion.backing.extent.height) {
@@ -215,7 +304,7 @@ index 6546eed3..4920067e 100644
  		return; // the images were replaced after the TAA pass
  	}
  	Configure(graphics, inputs.depth, inputs.depth_view, depth.backing);
-@@ -792,6 +842,7 @@ void PrepareInputs(GraphicContext& graphics, TextureCache& cache, CommandBuffer&
+@@ -792,6 +889,7 @@ void PrepareInputs(GraphicContext& graphics, TextureCache& cache, CommandBuffer&
  	inputs.camera        = camera;
  	inputs.guest_frame   = g_guest_frame;
  	inputs.valid         = true;
