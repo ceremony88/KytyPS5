@@ -1,5 +1,5 @@
 diff --git a/src/graphics/presentation/window/swapchain.cpp b/src/graphics/presentation/window/swapchain.cpp
-index 29920edd..5a10feba 100644
+index 29920edd..101a7602 100644
 --- a/src/graphics/presentation/window/swapchain.cpp
 +++ b/src/graphics/presentation/window/swapchain.cpp
 @@ -370,11 +370,11 @@ struct Presenter::Impl {
@@ -54,6 +54,23 @@ index 29920edd..5a10feba 100644
  		}
  		if (hud.title.empty() && hud.status.empty() && hud.notice.empty()) {
  			return nullptr;
+@@ -894,6 +900,7 @@ Presenter::Frame& Presenter::PrepareBlankFrame(uint32_t width, uint32_t height,
+ 	auto*             frame  = m_impl->frames.Acquire();
+ 	Common::LockGuard render_lock(m_impl->renderer.GetMutex());
+ 	frame->fg.valid = false;
++	frame->fg.issue = FrameGen::InputIssue::None;
+ 	frame->Configure(m_impl->window.graphic_ctx, {width, height}, format);
+ 	vk::ClearColorValue clear {};
+ 	clear.float32[3] = opaque ? 1.0f : 0.0f;
+@@ -988,7 +995,7 @@ void Presenter::Present(Frame& frame, bool reuse) {
+ 		// the generated frames; an idle refresh of the last frame carries no new inputs.
+ 		const bool generate = FrameGen::Enabled();
+ 		if (generate) {
+-			FrameGen::BeforePresent(frame.fg.valid && !frame.reusing_last ? &frame.fg : nullptr,
++			FrameGen::BeforePresent(!frame.reusing_last ? &frame.fg : nullptr,
+ 			                        swapchain.Extent(), swapchain.PresentRegion(), swapchain.Format(),
+ 			                        swapchain.ImageCount());
+ 		}
 diff --git a/src/local/frame-gen.cpp b/src/local/frame-gen.cpp
 index 6546eed3..4920067e 100644
 --- a/src/local/frame-gen.cpp
