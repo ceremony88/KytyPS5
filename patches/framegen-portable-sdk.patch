@@ -45,6 +45,7 @@ index 29920edd..2d4384f4 100644
 +				std::snprintf(detail.data(), detail.size(), "game %.0f fps  |  generated %.0f fps", game, generated);
  			} else {
  				std::snprintf(detail.data(), detail.size(), "game %.0f fps", game);
+ 		}
 @@ -433,6 +438,7 @@ struct Presenter::Impl {
  			hud.detail = detail.data();
  			hud_window = now;
