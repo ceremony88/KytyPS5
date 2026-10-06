@@ -1,5 +1,5 @@
 diff --git a/src/graphics/presentation/window/swapchain.cpp b/src/graphics/presentation/window/swapchain.cpp
-index 29920edd..101a7602 100644
+index 29920edd..2d4384f4 100644
 --- a/src/graphics/presentation/window/swapchain.cpp
 +++ b/src/graphics/presentation/window/swapchain.cpp
 @@ -370,11 +370,11 @@ struct Presenter::Impl {
@@ -30,8 +30,8 @@ index 29920edd..101a7602 100644
 +			const double game = hud_frames / seconds;
 +			const uint64_t presented_total = FrameGen::PresentedFrameCount();
 +			const uint64_t presented_delta = presented_total >= hud_presented_frames
-+			                                     ? presented_total - hud_presented_frames
-+			                                     : 0;
++				                                     ? presented_total - hud_presented_frames
++				                                     : 0;
 +			const double displayed = FrameGen::Enabled() ? presented_delta / seconds : game;
 +			const double generated = std::max(0.0, displayed - game);
  			std::array<char, 32>  title {};
@@ -45,7 +45,6 @@ index 29920edd..101a7602 100644
 +				std::snprintf(detail.data(), detail.size(), "game %.0f fps  |  generated %.0f fps", game, generated);
  			} else {
  				std::snprintf(detail.data(), detail.size(), "game %.0f fps", game);
- 			}
 @@ -433,6 +438,7 @@ struct Presenter::Impl {
  			hud.detail = detail.data();
  			hud_window = now;
@@ -62,20 +61,40 @@ index 29920edd..101a7602 100644
  	frame->Configure(m_impl->window.graphic_ctx, {width, height}, format);
  	vk::ClearColorValue clear {};
  	clear.float32[3] = opaque ? 1.0f : 0.0f;
-@@ -988,7 +995,7 @@ void Presenter::Present(Frame& frame, bool reuse) {
+@@ -987,14 +994,15 @@ void Presenter::Present(Frame& frame, bool reuse) {
+ 		// KYTY_FRAMEGEN: Streamline takes the present (vkQueuePresentKHR is its hook) and adds
  		// the generated frames; an idle refresh of the last frame carries no new inputs.
  		const bool generate = FrameGen::Enabled();
++		const auto* fg_inputs = !frame.reusing_last ? &frame.fg : nullptr;
  		if (generate) {
 -			FrameGen::BeforePresent(frame.fg.valid && !frame.reusing_last ? &frame.fg : nullptr,
-+			FrameGen::BeforePresent(!frame.reusing_last ? &frame.fg : nullptr,
++			FrameGen::BeforePresent(fg_inputs,
  			                        swapchain.Extent(), swapchain.PresentRegion(), swapchain.Format(),
  			                        swapchain.ImageCount());
  		}
+ 		status = swapchain.Present();
+ 		if (generate) {
+-			FrameGen::AfterPresent();
++			FrameGen::AfterPresent(fg_inputs);
+ 		}
+ 		if (status != Swapchain::Status::Success) {
+ 			m_impl->RecoverSwapchain(status);
+ 		}
+ 	}
+ }
 diff --git a/src/local/frame-gen.cpp b/src/local/frame-gen.cpp
-index 6546eed3..bc0ccdd2 100644
+index 6546eed3..28f0aafb 100644
 --- a/src/local/frame-gen.cpp
 +++ b/src/local/frame-gen.cpp
-@@ -154,7 +154,7 @@ void CopyInto(vk::CommandBuffer command, Image& source, VulkanImage& target) {
+@@ -6,6 +6,7 @@
+ 
+ #include <algorithm>
+ #include <atomic>
++#include <chrono>
+ #include <cmath>
+ #include <cstdlib>
+ #include <cstring>
+@@ -154,7 +155,7 @@ void CopyInto(vk::CommandBuffer command, Image& source, VulkanImage& target) {
  
  // KYTY_FPS_HUD: frames shown per presented frame, and the panel's normalized rectangle (16 bits
  // per coordinate: x0, y0, x1, y1; 0 = none).
@@ -84,7 +103,7 @@ index 6546eed3..bc0ccdd2 100644
  std::atomic<uint64_t> g_static_rect {0};
  
  // No motion under the KYTY_FPS_HUD panel: DLSS-G would move it with the scene behind it.
-@@ -219,6 +219,19 @@ bool             g_options_set = false;
+@@ -219,6 +220,19 @@ bool             g_options_set = false;
  vk::Extent2D     g_options_backbuffer {};
  vk::Extent2D     g_options_render {};
  uint64_t         g_presents = 0;
@@ -104,7 +123,7 @@ index 6546eed3..bc0ccdd2 100644
  
  // Matrices in Streamline's convention: row-major, row vectors (p' = p * M).
  using Mat4 = sl::float4x4;
-@@ -404,8 +417,22 @@ void Initialize() {
+@@ -404,8 +418,22 @@ void Initialize() {
  	} else {
  		wchar_t exe[MAX_PATH] {};
  		GetModuleFileNameW(nullptr, exe, MAX_PATH);
@@ -129,7 +148,7 @@ index 6546eed3..bc0ccdd2 100644
  	}
  	const auto interposer = dir / "sl.interposer.dll";
  	if (std::getenv("KYTY_FRAMEGEN_VERBOSE") != nullptr) {
-@@ -525,6 +552,18 @@ void BeforePresent(const FrameInputs* inputs, vk::Extent2D backbuffer, vk::Rect2
+@@ -525,6 +553,18 @@ void BeforePresent(const FrameInputs* inputs, vk::Extent2D backbuffer, vk::Rect2D region,
  	}
  	const sl::ViewportHandle viewport {0};
  	const bool               usable = inputs != nullptr && inputs->valid;
@@ -148,25 +167,25 @@ index 6546eed3..bc0ccdd2 100644
  	// DLSS-G options: on while frames carry inputs; sizes are hints for its allocations.
  	if (!g_options_set || (usable && (g_options_backbuffer != backbuffer ||
  	                                  g_options_render != inputs->render_extent))) {
-@@ -670,9 +709,13 @@ void BeforePresent(const FrameInputs* inputs, vk::Extent2D backbuffer, vk::Rect2
+@@ -670,9 +710,13 @@ void BeforePresent(const FrameInputs* inputs, vk::Extent2D backbuffer, vk::Rect2D region,
  		    sl::ResourceTag(nullptr, sl::kBufferTypeBackbuffer, sl::ResourceLifecycle::eValidUntilPresent,
  		                    &game),
  		};
 -		if (const auto result = g_api.set_tag_for_frame(token, viewport, tags, partial ? 3u : 2u, nullptr);
 -		    result != sl::Result::eOk && g_presents < 8) {
--			LOGF("frame generation: slSetTagForFrame failed (%d)\n", static_cast<int>(result));
+-			LOGF("frame generation: slSetTagForFrame failed (%d)
+", static_cast<int>(result));
 +		const auto result = g_api.set_tag_for_frame(token, viewport, tags, partial ? 3u : 2u, nullptr);
 +		++g_tag_frames_valid;
 +		if (result != sl::Result::eOk) {
 +			++g_tag_failures;
 +			if (g_presents < 8) {
-+				LOGF("frame generation: slSetTagForFrame failed (%d)\n", static_cast<int>(result));
++				LOGF("frame generation: slSetTagForFrame failed (%d)
+", static_cast<int>(result));
 +			}
  		}
  	} else {
- 		// Menus, movies, loading: no valid depth and motion (DLSS-G then presents the frame as is).
-@@ -680,7 +723,12 @@ void BeforePresent(const FrameInputs* inputs, vk::Extent2D backbuffer, vk::Rect2
- 		    sl::ResourceTag(nullptr, sl::kBufferTypeDepth, sl::ResourceLifecycle::eValidUntilPresent),
+@@ -680,7 +724,12 @@ void BeforePresent(const FrameInputs* inputs, vk::Extent2D backbuffer, vk::Rect2D region,
  		    sl::ResourceTag(nullptr, sl::kBufferTypeMotionVectors, sl::ResourceLifecycle::eValidUntilPresent),
  		};
 -		g_api.set_tag_for_frame(token, viewport, tags, static_cast<uint32_t>(std::size(tags)), nullptr);
@@ -179,8 +198,51 @@ index 6546eed3..bc0ccdd2 100644
  	}
  	g_api.pcl_set_marker(sl::PCLMarker::eRenderSubmitEnd, token);
  	g_api.pcl_set_marker(sl::PCLMarker::ePresentStart, token);
-@@ -700,14 +748,17 @@ void AfterPresent() {
+@@ -693,21 +742,93 @@ void BeforePresent(const FrameInputs* inputs, vk::Extent2D backbuffer, vk::Rect2D region,
+ 	(void)image_count;
+ #endif
+ }
+ 
+-void AfterPresent() {
++void AfterPresent(const FrameInputs* inputs) {
+ #ifdef KYTY_FRAMEGEN_STREAMLINE
+ 	if (!g_ready || g_token == nullptr) {
+ 		return;
  	}
++	using Clock = std::chrono::steady_clock;
++	static auto     sample_start = Clock::now();
++	static uint64_t sample_first_guest_frame = 0;
++	static uint64_t sample_last_guest_frame = 0;
++	static uint64_t sample_presents = 0;
++	static uint64_t sample_valid = 0;
++	static uint64_t sample_no_frame = 0;
++	static uint64_t sample_no_taa = 0;
++	static uint64_t sample_no_camera = 0;
++	static uint64_t sample_replaced = 0;
++	static uint64_t sample_generated = 0;
++	static uint64_t sample_sl_presented = 0;
++	static uint64_t sample_state_failures = 0;
++	if (sample_first_guest_frame == 0 && inputs != nullptr && inputs->guest_frame != 0) {
++		sample_first_guest_frame = inputs->guest_frame;
++	}
++	if (inputs != nullptr) {
++		if (inputs->guest_frame != 0) {
++			sample_last_guest_frame = inputs->guest_frame;
++		}
++		if (inputs->valid) {
++			++sample_valid;
++		} else {
++			switch (inputs->issue) {
++				case InputIssue::MissingTaa: ++sample_no_taa; break;
++				case InputIssue::MissingCamera: ++sample_no_camera; break;
++				case InputIssue::ReplacedImages: ++sample_replaced; break;
++				case InputIssue::None: ++sample_no_frame; break;
++			}
++		}
++	} else {
++		++sample_no_frame;
++	}
++	++sample_presents;
  	g_api.pcl_set_marker(sl::PCLMarker::ePresentEnd, *g_token);
  	const auto presents = ++g_presents;
 -	if (presents % 30 != 1) {
@@ -193,60 +255,101 @@ index 6546eed3..bc0ccdd2 100644
  	if (g_api.dlssg_get_state(sl::ViewportHandle {0}, state, nullptr) != sl::Result::eOk) {
 -		return;
 +		++g_state_query_failures;
++		++sample_state_failures;
 +		// DLSS-G always presents the host frame; only the generated frame may be dropped.
 +		g_presented_frames.fetch_add(1, std::memory_order_relaxed);
 +	} else {
++		sample_sl_presented += state.numFramesActuallyPresented;
++		sample_generated += state.numFramesActuallyPresented > 1 ? state.numFramesActuallyPresented - 1 : 0;
 +		g_presented_frames.fetch_add(std::max(state.numFramesActuallyPresented, 1u), std::memory_order_relaxed);
++	}
++	const auto now = Clock::now();
++	if (now - sample_start >= std::chrono::seconds(1)) {
++		const uint64_t first_guest_frame = sample_first_guest_frame;
++		const uint64_t last_guest_frame = sample_last_guest_frame;
++		LOGF("Frame generation sample: guest_frames=%" PRIu64 "..%" PRIu64
++		     " presents=%" PRIu64 " valid=%" PRIu64 " no_taa=%" PRIu64 " no_camera=%" PRIu64
++		     " replaced=%" PRIu64 " no_frame=%" PRIu64 " generated=%" PRIu64
++		     " streamline_presented=%" PRIu64 " state_failures=%" PRIu64 "
+",
++		     first_guest_frame, last_guest_frame, sample_presents, sample_valid, sample_no_taa,
++		     sample_no_camera, sample_replaced, sample_no_frame, sample_generated,
++		     sample_sl_presented, sample_state_failures);
++		std::printf("Frame generation sample: guest_frames=%" PRIu64 "..%" PRIu64
++		            " presents=%" PRIu64 " valid=%" PRIu64 " no_taa=%" PRIu64 " no_camera=%" PRIu64
++		            " replaced=%" PRIu64 " no_frame=%" PRIu64 " generated=%" PRIu64
++		            " streamline_presented=%" PRIu64 " state_failures=%" PRIu64 "
+",
++		            first_guest_frame, last_guest_frame, sample_presents, sample_valid, sample_no_taa,
++		            sample_no_camera, sample_replaced, sample_no_frame, sample_generated,
++		            sample_sl_presented, sample_state_failures);
++		std::fflush(stdout);
++		sample_start = now;
++		sample_first_guest_frame = 0;
++		sample_last_guest_frame = 0;
++		sample_presents = 0;
++		sample_valid = 0;
++		sample_no_frame = 0;
++		sample_no_taa = 0;
++		sample_no_camera = 0;
++		sample_replaced = 0;
++		sample_generated = 0;
++		sample_sl_presented = 0;
++		sample_state_failures = 0;
  	}
 -	g_presented_frames.store(std::max(state.numFramesActuallyPresented, 1u), std::memory_order_relaxed);
  	if (presents % 600 == 1) {
- 		LOGF("frame generation: status=0x%x presented=%u max_generated=%u vram=%" PRIu64 " MiB\n",
+ 		LOGF("frame generation: status=0x%x presented=%u max_generated=%u vram=%" PRIu64 " MiB
+",
  		     static_cast<uint32_t>(state.status), state.numFramesActuallyPresented,
-@@ -715,12 +766,42 @@ void AfterPresent() {
- 		std::printf("Frame generation: status=0x%x presented=%u max_generated=%u\n",
+@@ -715,12 +836,44 @@ void AfterPresent() {
+ 		std::printf("Frame generation: status=0x%x presented=%u max_generated=%u
+",
  		            static_cast<uint32_t>(state.status), state.numFramesActuallyPresented,
  		            state.numFramesToGenerateMax);
 +		LOGF("frame generation inputs: valid=%" PRIu64 " no_frame=%" PRIu64 " no_taa=%" PRIu64
-+		     " no_camera=%" PRIu64 " replaced=%" PRIu64 " state_failures=%" PRIu64 "\n",
++		     " no_camera=%" PRIu64 " replaced=%" PRIu64 " state_failures=%" PRIu64 "
+",
 +		     g_input_frames_valid, g_input_frames_no_frame, g_input_frames_no_taa,
 +		     g_input_frames_no_camera, g_input_frames_replaced, g_state_query_failures);
 +		std::printf("Frame generation inputs: valid=%" PRIu64 " no_frame=%" PRIu64 " no_taa=%" PRIu64
-+		            " no_camera=%" PRIu64 " replaced=%" PRIu64 " state_failures=%" PRIu64 "\n",
++		            " no_camera=%" PRIu64 " replaced=%" PRIu64 " state_failures=%" PRIu64 "
+",
 +		            g_input_frames_valid, g_input_frames_no_frame, g_input_frames_no_taa,
 +		            g_input_frames_no_camera, g_input_frames_replaced, g_state_query_failures);
 +		LOGF("Frame generation camera: draws=%" PRIu64 " shader_matches=%" PRIu64
-+		     " srt_too_short=%" PRIu64 " captures=%" PRIu64 "\n",
++		     " srt_too_short=%" PRIu64 " captures=%" PRIu64 "
+",
 +		     g_camera_draws.load(std::memory_order_relaxed),
 +		     g_camera_shader_matches.load(std::memory_order_relaxed),
 +		     g_camera_srt_too_short.load(std::memory_order_relaxed),
 +		     g_camera_captures.load(std::memory_order_relaxed));
 +		std::printf("Frame generation camera: draws=%" PRIu64 " shader_matches=%" PRIu64
-+		            " srt_too_short=%" PRIu64 " captures=%" PRIu64 "\n",
++		            " srt_too_short=%" PRIu64 " captures=%" PRIu64 "
+",
 +		            g_camera_draws.load(std::memory_order_relaxed),
 +		            g_camera_shader_matches.load(std::memory_order_relaxed),
 +		            g_camera_srt_too_short.load(std::memory_order_relaxed),
 +		            g_camera_captures.load(std::memory_order_relaxed));
 +		LOGF("Frame generation tags: valid=%" PRIu64 " missing_inputs=%" PRIu64
-+		     " failures=%" PRIu64 "\n",
++		     " failures=%" PRIu64 "
+",
 +		     g_tag_frames_valid.load(std::memory_order_relaxed),
 +		     g_tag_frames_missing.load(std::memory_order_relaxed),
 +		     g_tag_failures.load(std::memory_order_relaxed));
 +		std::printf("Frame generation tags: valid=%" PRIu64 " missing_inputs=%" PRIu64
-+		            " failures=%" PRIu64 "\n",
++		            " failures=%" PRIu64 "
+",
 +		            g_tag_frames_valid.load(std::memory_order_relaxed),
 +		            g_tag_frames_missing.load(std::memory_order_relaxed),
 +		            g_tag_failures.load(std::memory_order_relaxed));
  		std::fflush(stdout);
  	}
+ #else
++	(void)inputs;
  #endif
  }
- 
--uint32_t PresentedFrames() {
-+uint64_t PresentedFrameCount() {
- 	return g_presented_frames.load(std::memory_order_relaxed);
- }
- 
-@@ -732,9 +813,17 @@ void SetStaticRect(float x0, float y0, float x1, float y1) {
+@@ -732,9 +885,17 @@ void SetStaticRect(float x0, float y0, float x1, float y1) {
  }
  
  void OnDraw(uint64_t vs_hash, std::span<const uint32_t> srt) {
@@ -266,18 +369,13 @@ index 6546eed3..bc0ccdd2 100644
 +	if (g_camera.valid) {
  		return;
  	}
- 	for (uint32_t i = 0; i < 16; ++i) {
-@@ -749,6 +838,7 @@ void OnDraw(uint64_t vs_hash, std::span<const uint32_t> srt) {
+@@ -749,6 +910,7 @@ void OnDraw(uint64_t vs_hash, std::span<const uint32_t> srt) {
  	}
  	g_camera.jitter_ndc = {AsFloat(srt[SrtJitter]), AsFloat(srt[SrtJitter + 1])};
  	g_camera.valid      = true;
 +	g_camera_captures.fetch_add(1, std::memory_order_relaxed);
  }
- 
- void OnDispatch(uint64_t cs_hash, ImageId depth, uint64_t depth_address, ImageId motion,
-@@ -762,13 +852,19 @@ void OnDispatch(uint64_t cs_hash, ImageId depth, uint64_t depth_address, ImageId
- void PrepareInputs(GraphicContext& graphics, TextureCache& cache, CommandBuffer& command,
-                    FrameInputs& inputs) {
+@@ -762,13 +924,22 @@ void PrepareInputs(GraphicContext& graphics, TextureCache& cache, CommandBuffer& command,
  	inputs.valid = false;
 -	const bool ready = g_sources.valid && g_camera.valid;
 +	inputs.issue = InputIssue::MissingTaa;
@@ -289,31 +387,30 @@ index 6546eed3..bc0ccdd2 100644
  	g_sources.valid    = false;
  	g_camera.valid     = false;
  	++g_guest_frame;
++	inputs.guest_frame = g_guest_frame;
  	if (!ready) {
 +		if (has_sources && !has_camera) {
 +			inputs.issue = InputIssue::MissingCamera;
 +		}
  		return;
  	}
- 	auto& depth  = cache.GetImage(sources.depth);
-@@ -777,6 +873,7 @@ void PrepareInputs(GraphicContext& graphics, TextureCache& cache, CommandBuffer&
+@@ -777,6 +948,7 @@ void PrepareInputs(GraphicContext& graphics, TextureCache& cache, CommandBuffer& command,
  	    motion.info.data.address != sources.motion_address ||
  	    depth.backing.extent.width != motion.backing.extent.width ||
  	    depth.backing.extent.height != motion.backing.extent.height) {
 +		inputs.issue = InputIssue::ReplacedImages;
  		return; // the images were replaced after the TAA pass
  	}
- 	Configure(graphics, inputs.depth, inputs.depth_view, depth.backing);
-@@ -792,6 +889,7 @@ void PrepareInputs(GraphicContext& graphics, TextureCache& cache, CommandBuffer&
+@@ -790,8 +961,9 @@ void PrepareInputs(GraphicContext& graphics, TextureCache& cache, CommandBuffer& command,
+ 	}
+ 	inputs.render_extent = {motion.backing.extent.width, motion.backing.extent.height};
  	inputs.camera        = camera;
- 	inputs.guest_frame   = g_guest_frame;
+-	inputs.guest_frame   = g_guest_frame;
  	inputs.valid         = true;
 +	inputs.issue         = InputIssue::None;
  }
- 
- void DestroyInputs(GraphicContext& graphics, FrameInputs& inputs) {
 diff --git a/src/local/frame-gen.h b/src/local/frame-gen.h
-index 5fea5290..d108d3fd 100644
+index 5fea5290..b4adb310 100644
 --- a/src/local/frame-gen.h
 +++ b/src/local/frame-gen.h
 @@ -34,6 +34,8 @@ struct Camera {
@@ -324,25 +421,30 @@ index 5fea5290..d108d3fd 100644
 +
  // One presented frame's inputs, owned by the presenter's frame.
  struct FrameInputs {
- 	VulkanImage   depth, motion;
 @@ -43,6 +45,7 @@ struct FrameInputs {
  	uint64_t      guest_frame = 0;
  	bool          motion_attachment = false; // the motion copy is a color attachment too
  	bool          valid       = false;
 +	InputIssue    issue       = InputIssue::MissingTaa;
  };
- 
- // Process start, before the window: loads Streamline when KYTY_FRAMEGEN is set (it then becomes
-@@ -65,9 +68,9 @@ void BypassCommandHooks(vk::Device device);
+@@ -64,10 +67,10 @@ void BypassCommandHooks(vk::Device device);
+ // game image covers.
  void BeforePresent(const FrameInputs* inputs, vk::Extent2D backbuffer, vk::Rect2D region,
                     vk::Format format, uint32_t image_count);
- void AfterPresent();
+-void AfterPresent();
 -// Present thread: the frames DLSS-G showed per presented frame (1 without generation), as last
 -// queried (about once a second), for the KYTY_FPS_HUD panel.
 -[[nodiscard]] uint32_t PresentedFrames();
++void AfterPresent(const FrameInputs* inputs);
 +// Present thread: cumulative frames actually shown by Streamline. Queried after each host present
 +// so the HUD can count displayed and generated frames over its own measurement interval.
 +[[nodiscard]] uint64_t PresentedFrameCount();
  // KYTY_FPS_HUD: the panel's rectangle, normalized to the game image. Its motion vectors are
  // zeroed so generated frames keep the panel in place.
  void SetStaticRect(float x0, float y0, float x1, float y1);
+@@ -75,3 +78,4 @@ void OnDispatch(uint64_t cs_hash, ImageId depth, uint64_t depth_address, ImageId motion,
+ void DestroyInputs(GraphicContext& graphics, FrameInputs& inputs);
+ 
+ } // namespace FrameGen
+-} // namespace Graphics
++} // namespace Graphics
