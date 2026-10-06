@@ -1,0 +1,28 @@
+diff --git a/src/local/frame-gen.cpp b/src/local/frame-gen.cpp
+index 6546eed3..1922aadf 100644
+--- a/src/local/frame-gen.cpp
++++ b/src/local/frame-gen.cpp
+@@ -404,7 +404,21 @@ void Initialize() {
+ 	} else {
+ 		wchar_t exe[MAX_PATH] {};
+ 		GetModuleFileNameW(nullptr, exe, MAX_PATH);
+-		dir = std::filesystem::path(exe).parent_path().parent_path() / "deps" / "streamline" / "sdk" /
+-		      "bin" / "x64";
++		const auto exe_dir = std::filesystem::path(exe).parent_path();
++		// Source builds place the executable in _Build/windows and Streamline in _Build/deps.
++		// Portable releases place the executable at the package root and keep the SDK in _Build/deps.
++		const std::filesystem::path candidates[] {
++		    exe_dir / "_Build" / "deps" / "streamline" / "sdk" / "bin" / "x64",
++		    exe_dir / "deps" / "streamline" / "sdk" / "bin" / "x64",
++		    exe_dir.parent_path() / "deps" / "streamline" / "sdk" / "bin" / "x64",
++		    exe_dir.parent_path().parent_path() / "deps" / "streamline" / "sdk" / "bin" / "x64",
++		};
++		dir = candidates[3]; // Preserve the previous fallback for a useful load-error path.
++		for (const auto& candidate: candidates) {
++			if (std::filesystem::exists(candidate / "sl.interposer.dll")) {
++				dir = candidate;
++				break;
++			}
++		}
+ 	}
+ 	const auto interposer = dir / "sl.interposer.dll";
