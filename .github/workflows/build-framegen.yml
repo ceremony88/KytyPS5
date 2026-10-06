@@ -1,0 +1,92 @@
+name: Build KytyPS5 with Streamline Frame Generation
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    name: Windows x64 Frame Generation build
+    runs-on: windows-2022
+    steps:
+      - name: Checkout workflow and patch files
+        uses: actions/checkout@v4
+
+      - name: Checkout the exact KytyPS5 source for this executable
+        uses: actions/checkout@v4
+        with:
+          repository: chenxiao07/KytyPS5
+          ref: KytyPS5-20261006-9a04ed36
+          path: kyty-source
+          submodules: recursive
+
+      # Only the public headers are needed at compile time. Keep NVIDIA's runtime DLLs out
+      # of the artifact; the user supplies their matching Streamline 2.14.1 SDK binaries.
+      - name: Checkout Streamline 2.14.1 headers
+        uses: actions/checkout@v4
+        with:
+          repository: NVIDIA-RTX/Streamline
+          ref: v2.14.1
+          path: kyty-source/_Build/deps/streamline/sdk
+          sparse-checkout: include
+          sparse-checkout-cone-mode: true
+
+      - name: Apply portable SDK-path fix
+        shell: pwsh
+        run: git -C kyty-source apply "$env:GITHUB_WORKSPACE\patches\framegen-portable-sdk.patch"
+
+      - name: Install LLVM 19.1.7
+        shell: pwsh
+        run: choco upgrade llvm --version=19.1.7 --allow-downgrade --no-progress -y
+
+      - name: Locate vcpkg
+        id: vcpkg
+        shell: pwsh
+        run: |
+          $root = Split-Path (Get-Command vcpkg).Source
+          $hash = (Get-FileHash "$root\ports\glslang\vcpkg.json" -Algorithm SHA256).Hash.ToLowerInvariant()
+          "root=$root" >> $env:GITHUB_OUTPUT
+          "port_hash=$hash" >> $env:GITHUB_OUTPUT
+
+      - name: Cache glslang
+        id: glslang
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.vcpkg.outputs.root }}\installed\x64-windows
+          key: glslang-${{ runner.os }}-${{ steps.vcpkg.outputs.port_hash }}-tools-opt
+
+      - name: Install glslang
+        shell: pwsh
+        run: |
+          if ('${{ steps.glslang.outputs.cache-hit }}' -ne 'true') { vcpkg install 'glslang[tools,opt]:x64-windows' }
+          "${{ steps.vcpkg.outputs.root }}\installed\x64-windows\tools\glslang" >> $env:GITHUB_PATH
+
+      - name: Build and verify Streamline support is compiled in
+        shell: cmd
+        env:
+          KYTY_CMAKE_ARGS: -DKYTY_MARCH=x86-64-v3
+        working-directory: kyty-source
+        run: |
+          call build-windows.cmd kyty_emulator || exit /b 1
+          findstr /c:"KYTY_FRAMEGEN_STREAMLINE=1" _Build\windows\build.ninja >nul || exit /b 1
+
+      - name: Package emulator and launcher
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force framegen-build | Out-Null
+          Copy-Item kyty-source\_Build\windows\kyty_emulator.exe framegen-build\
+          Set-Content framegen-build\README.txt -Encoding ASCII -Value @(
+            'Frame Generation test build for KytyPS5 tag 9a04ed36.',
+            'Back up the existing kyty_emulator.exe in your test copy, then replace it with this file.',
+            'Keep your existing launcher, launch.json, and Streamline DLLs under _Build\deps\streamline\sdk\bin\x64.',
+            'Run the game with -FrameGen 1. This executable checks the portable _Build\deps path.'
+          )
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: KytyPS5-FrameGen-${{ github.sha }}
+          path: framegen-build\
+          if-no-files-found: error
