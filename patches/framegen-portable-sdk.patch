@@ -530,6 +530,5 @@ index 28f0aafb..4b5e21de 100644
 +		sample_max_generated = 0;
  	}
  	if (presents % 600 == 1) {
-	
-
  		LOGF("frame generation: status=0x%x presented=%u max_generated=%u vram=%" PRIu64 " MiB\n",
+	
