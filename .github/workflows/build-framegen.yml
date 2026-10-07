@@ -18,7 +18,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: chenxiao07/KytyPS5
-          ref: KytyPS5-20261006-9a04ed36
+          ref: v20261007
           path: kyty-source
           submodules: recursive
 
@@ -36,6 +36,10 @@ jobs:
       - name: Apply portable SDK-path fix
         shell: pwsh
         run: git -C kyty-source apply "$env:GITHUB_WORKSPACE\patches\framegen-portable-sdk.patch"
+
+      - name: Preserve NVIDIA driver address space for Frame Generation
+        shell: pwsh
+        run: git -C kyty-source apply "$env:GITHUB_WORKSPACE\patches\framegen-driver-address-hole.patch"
 
       - name: Install LLVM 19.1.7
         shell: pwsh
@@ -77,11 +81,13 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force framegen-build | Out-Null
           Copy-Item kyty-source\_Build\windows\kyty_emulator.exe framegen-build\
+          Copy-Item launcher.cmd, launcher.ps1, run-windows.ps1 framegen-build\
           Set-Content framegen-build\README.txt -Encoding ASCII -Value @(
-            'Frame Generation test build for KytyPS5 tag 9a04ed36.',
-            'Back up the existing kyty_emulator.exe in your test copy, then replace it with this file.',
-            'Keep your existing launcher, launch.json, and Streamline DLLs under _Build\deps\streamline\sdk\bin\x64.',
-            'Run the game with -FrameGen 1. This executable checks the portable _Build\deps path.'
+            'Frame Generation test build for KytyPS5 tag v20261007.',
+            'Copy kyty_emulator.exe, launcher.cmd, launcher.ps1, and run-windows.ps1 into your test copy.',
+            'Keep your existing launch.json and launcher-settings.json.',
+            'Put the Streamline runtime DLLs in streamline\bin\x64 next to kyty_emulator.exe, or under _Build\deps\streamline\sdk\bin\x64.',
+            'Run the game with -FrameGen 1.'
           )
 
       - name: Upload build artifact

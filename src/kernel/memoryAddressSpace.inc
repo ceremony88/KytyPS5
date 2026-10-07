@@ -1630,6 +1630,11 @@ private:
 			}
 			next_addr = region_end;
 		}
+		// Keep the address range left for NVIDIA's optical-flow/NGX allocations free from other
+		// host allocations until Vulkan creates its device.
+		if (ceiling != 0) {
+			LocalDriverHole::Hold(guest_end, 0x10000000000ull);
+		}
 #else
 		const std::array<std::pair<uint64_t, uint64_t>, 3> regions {{
 		    {HOST_SYSTEM_MANAGED_MIN, HOST_SYSTEM_MANAGED_MAX + 1u},

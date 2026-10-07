@@ -12,7 +12,7 @@ $languages = 'Japanese', 'English (United States)', 'French (France)', 'Spanish 
 $resolutions = '1280x720', '1920x1080', '2560x1440', '3840x2160'
 
 $settings = [ordered]@{ game = ''; resolution = '2560x1440'; fullscreen = $false; aspect = $true; language = 1; redzone = $true;
-	ecores = $false }
+	ecores = $false; framegen = $false; fog = $true; ambientShadowing = $true; filmGrain = $true; bloom = $true; contactShadows = $true; sunShadows = $true }
 if (Test-Path $settingsPath) {
 	$saved = Get-Content $settingsPath -Raw | ConvertFrom-Json
 	foreach ($property in $saved.PSObject.Properties) { if ($settings.Contains($property.Name)) { $settings[$property.Name] = $property.Value } }
@@ -60,6 +60,21 @@ function Get-PlayCommand {
 		'-Width', $size[0], '-Height', $size[1], '-Language', $settings.language)
 	if ($settings.fullscreen) { $arguments += '-Fullscreen'; if ($settings.aspect) { $arguments += '-AspectFit' } }
 	if (!$settings.redzone) { $arguments += '-NoRedZone' }
+	if ($settings.framegen) { $arguments += @('-FrameGen', '1') }
+	$gameConvars = @(
+		[pscustomobject]@{ Key = 'fog'; Name = 'fog_enable' },
+		[pscustomobject]@{ Key = 'ambientShadowing'; Name = 'r_enableAmbientShadowing' },
+		[pscustomobject]@{ Key = 'filmGrain'; Name = 'filmGrain_enable' },
+		[pscustomobject]@{ Key = 'bloom'; Name = 'r_bloomEnable' },
+		[pscustomobject]@{ Key = 'contactShadows'; Name = 'r_contactShadowsEnabled' },
+		[pscustomobject]@{ Key = 'sunShadows'; Name = 'r_enableCascadeShadows' }
+	)
+	$convars = @()
+	foreach ($item in $gameConvars) {
+		$value = if ($settings[$item.Key]) { 'true' } else { 'false' }
+		$convars += "$($item.Name)=$value"
+	}
+	$arguments += @('-GameConvars', "`"$($convars -join ';')`"")
 	if ($settings.game) { $arguments += @('-Game', "`"$($settings.game)`"") }
 	# The console stays for the live log; after a crash it waits for a key.
 	return 'powershell ' + ($arguments -join ' ') + ' & if !errorlevel! neq 0 pause'
@@ -134,6 +149,27 @@ $language = New-Object System.Windows.Forms.ComboBox -Property @{ DropDownStyle 
 $language.Items.AddRange($languages)
 $language.SelectedIndex = [Math]::Max(0, [Math]::Min($languages.Count - 1, [int]$settings.language))
 Add-Row 'Console language' @($language)
+$gameEffects = @(
+	[pscustomobject]@{ Key = 'fog'; Label = 'Volumetric fog' },
+	[pscustomobject]@{ Key = 'ambientShadowing'; Label = 'Ambient shadowing / AO' },
+	[pscustomobject]@{ Key = 'filmGrain'; Label = 'Film grain' },
+	[pscustomobject]@{ Key = 'bloom'; Label = 'Bloom' },
+	[pscustomobject]@{ Key = 'contactShadows'; Label = 'Contact shadows' },
+	[pscustomobject]@{ Key = 'sunShadows'; Label = 'Sun shadows' }
+)
+$effectCheckboxes = @{}
+foreach ($effect in $gameEffects) {
+	$checkbox = New-Object System.Windows.Forms.CheckBox -Property @{
+		Text = "$($effect.Label) (uncheck to turn off)"; AutoSize = $true; Checked = [bool]$settings[$effect.Key]
+	}
+	$effectCheckboxes[$effect.Key] = $checkbox
+	Add-Row $(if ($effect.Key -eq 'fog') { 'Game effects' } else { '' }) @($checkbox)
+}
+$framegen = New-Object System.Windows.Forms.CheckBox -Property @{
+	Text = 'DLSS Frame Generation (2x; needs NVIDIA RTX 40/50 and Streamline SDK)'; AutoSize = $true
+	Checked = [bool]$settings.framegen
+}
+Add-Row 'Performance' @($framegen)
 $redzone = New-Object System.Windows.Forms.CheckBox -Property @{ Text = 'Red-zone protection (recommended)'; AutoSize = $true; Checked = [bool]$settings.redzone }
 Add-Row '' @($redzone)
 $ecores = New-Object System.Windows.Forms.CheckBox -Property @{ Text = 'Precompile on the efficiency cores only (slower, the PC stays responsive)'; AutoSize = $true
@@ -160,6 +196,8 @@ function Read-Form {
 	$settings.fullscreen = $fullscreen.Checked
 	$settings.aspect     = $aspect.Checked
 	$settings.language   = $language.SelectedIndex
+	$settings.framegen   = $framegen.Checked
+	foreach ($effect in $gameEffects) { $settings[$effect.Key] = $effectCheckboxes[$effect.Key].Checked }
 	$settings.redzone    = $redzone.Checked
 	$settings.ecores     = $ecores.Checked
 	Save-Settings

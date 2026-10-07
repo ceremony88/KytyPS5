@@ -38,6 +38,7 @@
 #include "libs/controller.h"
 #include "loader/systemContent.h"
 #include "frame-gen.h"
+#include "driver-address-hole.h"
 #ifdef KYTY_LOCAL_VULKAN_RECORDING
 #include "vulkan-recording.h"
 #endif
@@ -911,6 +912,9 @@ static vk::Device VulkanCreateDevice(vk::PhysicalDevice physical_device, const V
 	create_info.pEnabledFeatures        = &device_features;
 
 	vk::Device device = nullptr;
+
+	// Release the range held during guest-memory setup so NVIDIA can reserve it at device creation.
+	LocalDriverHole::Release();
 
 	auto result = physical_device.createDevice(&create_info, nullptr, &device);
 	if (result != vk::Result::eSuccess) {

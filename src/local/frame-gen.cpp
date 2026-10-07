@@ -397,15 +397,23 @@ void Initialize() {
 		return;
 	}
 #ifdef KYTY_FRAMEGEN_STREAMLINE
-	// Streamline SDK binaries: KYTY_STREAMLINE_DIR, or the SDK unpacked next to the build.
+	// Streamline SDK binaries: explicit override, portable package, or an in-tree build.
 	std::filesystem::path dir;
 	if (const char* env = std::getenv("KYTY_STREAMLINE_DIR"); env != nullptr && *env != '\0') {
 		dir = env;
 	} else {
 		wchar_t exe[MAX_PATH] {};
 		GetModuleFileNameW(nullptr, exe, MAX_PATH);
-		dir = std::filesystem::path(exe).parent_path().parent_path() / "deps" / "streamline" / "sdk" /
-		      "bin" / "x64";
+		const auto exe_dir = std::filesystem::path(exe).parent_path();
+		const std::array candidates {
+		    exe_dir / "streamline" / "bin" / "x64",
+		    exe_dir / "_Build" / "deps" / "streamline" / "sdk" / "bin" / "x64",
+		    exe_dir.parent_path() / "deps" / "streamline" / "sdk" / "bin" / "x64",
+		};
+		const auto found = std::find_if(candidates.begin(), candidates.end(), [](const auto& candidate) {
+			return std::filesystem::exists(candidate / "sl.interposer.dll");
+		});
+		dir = found != candidates.end() ? *found : candidates[1];
 	}
 	const auto interposer = dir / "sl.interposer.dll";
 	if (std::getenv("KYTY_FRAMEGEN_VERBOSE") != nullptr) {

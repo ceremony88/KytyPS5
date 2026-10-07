@@ -46,6 +46,8 @@ param(
 	[switch]$AspectFit,
 	[int]$Language = -1,
 	[int]$FrameGen = 0,
+	[ValidateSet('On', 'Off')][string]$Fog = '',
+	[string]$GameConvars = '',
 	[string]$Affinity = '',
 	[switch]$Prompt,
 	[switch]$Follow,
@@ -251,6 +253,26 @@ if ($FrameGen -gt 0) { $environment['KYTY_FRAMEGEN'] = "$FrameGen" }
 foreach ($pair in ($Set | ForEach-Object { $_ -split ',(?=[A-Za-z_][A-Za-z0-9_]*=)' })) {
 	$key, $value = $pair -split '=', 2
 	if ($value) { $environment[$key] = $value } else { $environment.Remove($key); Remove-Item "env:$key" -ErrorAction SilentlyContinue }
+}
+if ($Fog) {
+	# Append after the launch config and -Set values so this checkbox controls fog even if another game
+	# convar was supplied. The game-args hook splits semicolons and adds each entry to the guest args file.
+	$fogConvar = "fog_enable=$($Fog.ToLowerInvariant())"
+	if ($environment['KYTY_GAME_CONVARS']) {
+		$environment['KYTY_GAME_CONVARS'] = "$($environment['KYTY_GAME_CONVARS']);$fogConvar"
+	} else {
+		$environment['KYTY_GAME_CONVARS'] = $fogConvar
+	}
+}
+foreach ($convar in ($GameConvars -split ';' | Where-Object { $_ })) {
+	if ($convar -notmatch '^[A-Za-z_][A-Za-z0-9_]*=(true|false)$') {
+		throw "invalid game convar '$convar'; expected NAME=true or NAME=false"
+	}
+	if ($environment['KYTY_GAME_CONVARS']) {
+		$environment['KYTY_GAME_CONVARS'] = "$($environment['KYTY_GAME_CONVARS']);$convar"
+	} else {
+		$environment['KYTY_GAME_CONVARS'] = $convar
+	}
 }
 
 # The performance cores of a hybrid CPU (Windows' CPU set efficiency classes: an Intel Core with
