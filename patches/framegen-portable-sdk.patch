@@ -207,7 +207,7 @@ index 6546eed3..0dab09bd 100644
 +	// Missing depth/motion inputs are tagged as null below. Keep presenting those frames, but
 +	// defer the history reset until valid inputs resume instead of asking Streamline to reset on
 +	// every consecutive input gap.
-+	constants.renderingGameFrames = inputs != nullptr ? sl::Boolean::eTrue : sl::Boolean::eFalse;
++	
 +	constants.reset = usable && g_history_reset_pending ? sl::Boolean::eTrue : sl::Boolean::eFalse;
 +	if (usable) {
 +		g_history_reset_pending = false;
