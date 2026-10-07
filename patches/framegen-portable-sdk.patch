@@ -330,11 +330,14 @@ index 6546eed3..4b5e21de 100644
 +		sample_status_or = 0;
 +		sample_max_generated = 0;
  	}
- 	if (presents % 600 == 1) {
+ 	
+-	g_presented_frames.store(std::max(state.numFramesActuallyPresented, 1u), std::memory_order_relaxed);
+if (presents % 600 == 1) {
  		LOGF("frame generation: status=0x%x presented=%u max_generated=%u vram=%" PRIu64 " MiB\n",
  		     static_cast<uint32_t>(state.status), state.numFramesActuallyPresented,
  		     state.numFramesToGenerateMax);
- 		std::printf("Frame generation: status=0x%x presented=%u max_generated=%u\n",
+ 		@@ -715,12 +844,44 @@ void AfterPresent() {
+std::printf("Frame generation: status=0x%x presented=%u max_generated=%u\n",
  		            static_cast<uint32_t>(state.status), state.numFramesActuallyPresented,
  		            state.numFramesToGenerateMax);
 +		LOGF("frame generation inputs: valid=%" PRIu64 " no_frame=%" PRIu64 " no_taa=%" PRIu64
