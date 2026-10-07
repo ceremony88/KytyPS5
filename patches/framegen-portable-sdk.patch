@@ -225,7 +225,7 @@ index 6546eed3..4b5e21de 100644
  	}
  	g_api.pcl_set_marker(sl::PCLMarker::eRenderSubmitEnd, token);
  	g_api.pcl_set_marker(sl::PCLMarker::ePresentStart, token);
-@@ -693,22 +742,101 @@ void BeforePresent(const FrameInputs* inputs, vk::Extent2D backbuffer, vk::Rect2
+@@ -693,21 +742,101 @@ void BeforePresent(const FrameInputs* inputs, vk::Extent2D backbuffer, vk::Rect2
  #endif
  }
  
@@ -288,6 +288,7 @@ index 6546eed3..4b5e21de 100644
 +		g_presented_frames.fetch_add(1, std::memory_order_relaxed);
 +	} else {
 +		sample_status_or |= static_cast<uint32_t>(state.status);
++		sample_max_generated = std::max(sample_max_generated, state.numFramesToGenerateMax);
 +		sample_sl_presented += state.numFramesActuallyPresented;
 +		sample_generated += state.numFramesActuallyPresented > 1 ? state.numFramesActuallyPresented - 1 : 0;
 +		g_presented_frames.fetch_add(std::max(state.numFramesActuallyPresented, 1u), std::memory_order_relaxed);
@@ -332,7 +333,6 @@ index 6546eed3..4b5e21de 100644
  	if (presents % 600 == 1) {
  		LOGF("frame generation: status=0x%x presented=%u max_generated=%u vram=%" PRIu64 " MiB\n",
  		     static_cast<uint32_t>(state.status), state.numFramesActuallyPresented,
- 		     state.numFramesToGenerateMax);
 @@ -715,12 +844,44 @@ void AfterPresent() {
  		std::printf("Frame generation: status=0x%x presented=%u max_generated=%u\n",
  		            static_cast<uint32_t>(state.status), state.numFramesActuallyPresented,
@@ -468,7 +468,7 @@ index 5fea5290..b4adb310 100644
 +	InputIssue    issue       = InputIssue::MissingTaa;
  };
  
- // Process start, before the window: loads Streamline when KYTY_FRAMEGEN is set (it then becomes
+  // Process start, before the window: loads Streamline when KYTY_FRAMEGEN is set (it then becomes
 @@ -64,10 +67,10 @@ void BypassCommandHooks(vk::Device device);
  // game image covers.
  void BeforePresent(const FrameInputs* inputs, vk::Extent2D backbuffer, vk::Rect2D region,
