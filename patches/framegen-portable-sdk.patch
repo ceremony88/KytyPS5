@@ -109,7 +109,6 @@ index 29920edd..2d4384f4 100644
  		}
  		if (status != Swapchain::Status::Success) {
  			m_impl->RecoverSwapchain(status);
- 		}
 diff --git a/src/local/frame-gen.cpp b/src/local/frame-gen.cpp
 index 6546eed3..4b5e21de 100644
 --- a/src/local/frame-gen.cpp
@@ -226,7 +225,7 @@ index 6546eed3..4b5e21de 100644
  	}
  	g_api.pcl_set_marker(sl::PCLMarker::eRenderSubmitEnd, token);
  	g_api.pcl_set_marker(sl::PCLMarker::ePresentStart, token);
-@@ -693,21 +742,101 @@ void BeforePresent(const FrameInputs* inputs, vk::Extent2D backbuffer, vk::Rect2
+@@ -693,22 +742,101 @@ void BeforePresent(const FrameInputs* inputs, vk::Extent2D backbuffer, vk::Rect2
  #endif
  }
  
@@ -289,7 +288,6 @@ index 6546eed3..4b5e21de 100644
 +		g_presented_frames.fetch_add(1, std::memory_order_relaxed);
 +	} else {
 +		sample_status_or |= static_cast<uint32_t>(state.status);
-+		sample_max_generated = std::max(sample_max_generated, state.numFramesToGenerateMax);
 +		sample_sl_presented += state.numFramesActuallyPresented;
 +		sample_generated += state.numFramesActuallyPresented > 1 ? state.numFramesActuallyPresented - 1 : 0;
 +		g_presented_frames.fetch_add(std::max(state.numFramesActuallyPresented, 1u), std::memory_order_relaxed);
@@ -330,7 +328,6 @@ index 6546eed3..4b5e21de 100644
 +		sample_status_or = 0;
 +		sample_max_generated = 0;
  	}
- 	
 -	g_presented_frames.store(std::max(state.numFramesActuallyPresented, 1u), std::memory_order_relaxed);
  	if (presents % 600 == 1) {
  		LOGF("frame generation: status=0x%x presented=%u max_generated=%u vram=%" PRIu64 " MiB\n",
@@ -411,7 +408,8 @@ index 6546eed3..4b5e21de 100644
  }
  
  void OnDispatch(uint64_t cs_hash, ImageId depth, uint64_t depth_address, ImageId motion,
-@@ -762,13 +932,20 @@ void PrepareInputs(GraphicContext& graphics, TextureCache& cache, CommandBuffer& command,
+@@ -762,13 +932,20 @@ void OnDispatch(uint64_t cs_hash, ImageId depth, uint64_t depth_address, ImageId
+ void PrepareInputs(GraphicContext& graphics, TextureCache& cache, CommandBuffer& command,
                     FrameInputs& inputs) {
  	inputs.valid = false;
 -	const bool ready = g_sources.valid && g_camera.valid;
@@ -432,7 +430,7 @@ index 6546eed3..4b5e21de 100644
  		return;
  	}
  	auto& depth  = cache.GetImage(sources.depth);
-@@ -777,6 +954,7 @@ void PrepareInputs(GraphicContext& graphics, TextureCache& cache, CommandBuffer& inputs) {
+@@ -777,6 +954,7 @@ void PrepareInputs(GraphicContext& graphics, TextureCache& cache, CommandBuffer&
  	    motion.info.data.address != sources.motion_address ||
  	    depth.backing.extent.width != motion.backing.extent.width ||
  	    depth.backing.extent.height != motion.backing.extent.height) {
@@ -440,7 +438,7 @@ index 6546eed3..4b5e21de 100644
  		return; // the images were replaced after the TAA pass
  	}
  	Configure(graphics, inputs.depth, inputs.depth_view, depth.backing);
-@@ -790,8 +968,8 @@ void PrepareInputs(GraphicContext& graphics, TextureCache& cache, CommandBuffer& command,
+@@ -790,8 +968,8 @@ void PrepareInputs(GraphicContext& graphics, TextureCache& cache, CommandBuffer&
  	}
  	inputs.render_extent = {motion.backing.extent.width, motion.backing.extent.height};
  	inputs.camera        = camera;
