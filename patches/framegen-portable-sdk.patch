@@ -468,7 +468,7 @@ index 5fea5290..b4adb310 100644
 +	InputIssue    issue       = InputIssue::MissingTaa;
  };
  
-  // Process start, before the window: loads Streamline when KYTY_FRAMEGEN is set (it then becomes
+ // Process start, before the window: loads Streamline when KYTY_FRAMEGEN is set (it then becomes
 @@ -64,10 +67,10 @@ void BypassCommandHooks(vk::Device device);
  // game image covers.
  void BeforePresent(const FrameInputs* inputs, vk::Extent2D backbuffer, vk::Rect2D region,
