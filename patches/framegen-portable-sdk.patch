@@ -79,7 +79,7 @@ index 29920edd..2d4384f4 100644
 +			FrameGen::AfterPresent(fg_inputs);
  		}
  		if (status != Swapchain::Status::Success) {
- 			m_impl->RecoverSwapchain(status);
+ 			m_impl->RecoverSwapchain(status)
 diff --git a/src/local/frame-gen.cpp b/src/local/frame-gen.cpp
 index 6546eed3..28f0aafb 100644
 --- a/src/local/frame-gen.cpp
