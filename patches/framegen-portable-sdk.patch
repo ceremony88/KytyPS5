@@ -1,3 +1,32 @@
+diff --git a/src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp b/src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
+index 384313a2..6e37671a 100644
+--- a/src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
++++ b/src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
+@@ -2260,6 +2260,11 @@ PipelineCache::Pipeline* PipelineCache::CreateGraphicsPipelineImpl(
+ 		const bool table = vs_input_info.stage.program != nullptr && vs_input_info.stage.program->table_mode;
+ 		if (table) m_table_pipeline_jobs.fetch_add(1, std::memory_order_relaxed);
+ 		(table ? TableWorkers() : Workers()).Push([this, job, table] {
++			SlowLog::Scope async_slow([&](double ms) {
++				std::printf("SLOW AsyncGraphicsPipeline %.1f ms VS=%" PRIu64 " PS=%" PRIu64 " table=%u\n",
++				            ms, job->vertex_program.id, job->ps_active ? job->pixel_program.id : 0,
++				            table ? 1u : 0u);
++			}, SlowLog::HitchThreshold());
+ 			CreatePipelineInternal(m_graphics, *job->pipeline, job->rendering, job->vertex_input,
+ 			                       job->vs_input_info, job->vertex_program,
+ 			                       job->ps_active ? &job->ps_input_info : nullptr, job->pixel_program,
+@@ -2406,7 +2411,11 @@ PipelineCache::Pipeline* PipelineCache::TryCreateComputePipeline(const ShaderCom
+ 	job->module     = compute_program.module;
+ 	m_pending_compute_pipelines.emplace(compute_program.id, job);
+ 	m_table_pipeline_jobs.fetch_add(1, std::memory_order_relaxed);
+-	TableWorkers().Push([this, job] { // (table dispatches' pipelines)
++	const auto compute_shader_id = compute_program.id;
++	TableWorkers().Push([this, job, compute_shader_id] { // (table dispatches' pipelines)
++		SlowLog::Scope async_slow([&](double ms) {
++			std::printf("SLOW AsyncComputePipeline %.1f ms shader=%" PRIu64 "\n", ms, compute_shader_id);
++		}, SlowLog::HitchThreshold());
+ 		CreatePipelineInternal(m_graphics, *job->pipeline, job->input_info, job->module, TablePipelineCache(),
+ 		                       PipelineBuild::Full, true);
+ 		TablePipelineDone();
 diff --git a/src/graphics/presentation/window/swapchain.cpp b/src/graphics/presentation/window/swapchain.cpp
 index 29920edd..2d4384f4 100644
 --- a/src/graphics/presentation/window/swapchain.cpp
@@ -79,9 +108,10 @@ index 29920edd..2d4384f4 100644
 +			FrameGen::AfterPresent(fg_inputs);
  		}
  		if (status != Swapchain::Status::Success) {
- 			m_impl->RecoverSwapchain(status)
+ 			m_impl->RecoverSwapchain(status);
+ 		}
 diff --git a/src/local/frame-gen.cpp b/src/local/frame-gen.cpp
-index 6546eed3..28f0aafb 100644
+index 6546eed3..4b5e21de 100644
 --- a/src/local/frame-gen.cpp
 +++ b/src/local/frame-gen.cpp
 @@ -6,6 +6,7 @@
@@ -219,6 +249,8 @@ index 6546eed3..28f0aafb 100644
 +	static uint64_t sample_generated = 0;
 +	static uint64_t sample_sl_presented = 0;
 +	static uint64_t sample_state_failures = 0;
++	static uint32_t sample_status_or = 0;
++	static uint32_t sample_max_generated = 0;
 +	if (sample_first_guest_frame == 0 && inputs != nullptr && inputs->guest_frame != 0) {
 +		sample_first_guest_frame = inputs->guest_frame;
 +	}
@@ -256,6 +288,8 @@ index 6546eed3..28f0aafb 100644
 +		// DLSS-G always presents the host frame; only the generated frame may be dropped.
 +		g_presented_frames.fetch_add(1, std::memory_order_relaxed);
 +	} else {
++		sample_status_or |= static_cast<uint32_t>(state.status);
++		sample_max_generated = std::max(sample_max_generated, state.numFramesToGenerateMax);
 +		sample_sl_presented += state.numFramesActuallyPresented;
 +		sample_generated += state.numFramesActuallyPresented > 1 ? state.numFramesActuallyPresented - 1 : 0;
 +		g_presented_frames.fetch_add(std::max(state.numFramesActuallyPresented, 1u), std::memory_order_relaxed);
@@ -267,17 +301,19 @@ index 6546eed3..28f0aafb 100644
 +		LOGF("Frame generation sample: guest_frames=%" PRIu64 "..%" PRIu64
 +		     " presents=%" PRIu64 " valid=%" PRIu64 " no_taa=%" PRIu64 " no_camera=%" PRIu64
 +		     " replaced=%" PRIu64 " no_frame=%" PRIu64 " generated=%" PRIu64
-+		     " streamline_presented=%" PRIu64 " state_failures=%" PRIu64 "\n",
++		     " streamline_presented=%" PRIu64 " state_failures=%" PRIu64
++		     " status_or=0x%x max_generated=%u\n",
 +		     first_guest_frame, last_guest_frame, sample_presents, sample_valid, sample_no_taa,
 +		     sample_no_camera, sample_replaced, sample_no_frame, sample_generated,
-+		     sample_sl_presented, sample_state_failures);
++		     sample_sl_presented, sample_state_failures, sample_status_or, sample_max_generated);
 +		std::printf("Frame generation sample: guest_frames=%" PRIu64 "..%" PRIu64
 +		            " presents=%" PRIu64 " valid=%" PRIu64 " no_taa=%" PRIu64 " no_camera=%" PRIu64
 +		            " replaced=%" PRIu64 " no_frame=%" PRIu64 " generated=%" PRIu64
-+		            " streamline_presented=%" PRIu64 " state_failures=%" PRIu64 "\n",
++		            " streamline_presented=%" PRIu64 " state_failures=%" PRIu64
++		            " status_or=0x%x max_generated=%u\n",
 +		            first_guest_frame, last_guest_frame, sample_presents, sample_valid, sample_no_taa,
 +		            sample_no_camera, sample_replaced, sample_no_frame, sample_generated,
-+		            sample_sl_presented, sample_state_failures);
++		            sample_sl_presented, sample_state_failures, sample_status_or, sample_max_generated);
 +		std::fflush(stdout);
 +		sample_start = now;
 +		sample_first_guest_frame = 0;
@@ -291,12 +327,13 @@ index 6546eed3..28f0aafb 100644
 +		sample_generated = 0;
 +		sample_sl_presented = 0;
 +		sample_state_failures = 0;
++		sample_status_or = 0;
++		sample_max_generated = 0;
  	}
--	g_presented_frames.store(std::max(state.numFramesActuallyPresented, 1u), std::memory_order_relaxed);
  	if (presents % 600 == 1) {
  		LOGF("frame generation: status=0x%x presented=%u max_generated=%u vram=%" PRIu64 " MiB\n",
  		     static_cast<uint32_t>(state.status), state.numFramesActuallyPresented,
-@@ -715,12 +836,44 @@ void AfterPresent() {
+ 		     state.numFramesToGenerateMax);
  		std::printf("Frame generation: status=0x%x presented=%u max_generated=%u\n",
  		            static_cast<uint32_t>(state.status), state.numFramesActuallyPresented,
  		            state.numFramesToGenerateMax);
@@ -342,7 +379,7 @@ index 6546eed3..28f0aafb 100644
  	return g_presented_frames.load(std::memory_order_relaxed);
  }
  
-@@ -732,9 +885,17 @@ void SetStaticRect(float x0, float y0, float x1, float y1) {
+@@ -732,9 +893,17 @@ void SetStaticRect(float x0, float y0, float x1, float y1) {
  }
  
  void OnDraw(uint64_t vs_hash, std::span<const uint32_t> srt) {
@@ -363,7 +400,7 @@ index 6546eed3..28f0aafb 100644
  		return;
  	}
  	for (uint32_t i = 0; i < 16; ++i) {
-@@ -749,6 +910,7 @@ void OnDraw(uint64_t vs_hash, std::span<const uint32_t> srt) {
+@@ -749,6 +918,7 @@ void OnDraw(uint64_t vs_hash, std::span<const uint32_t> srt) {
  	}
  	g_camera.jitter_ndc = {AsFloat(srt[SrtJitter]), AsFloat(srt[SrtJitter + 1])};
  	g_camera.valid      = true;
@@ -371,8 +408,7 @@ index 6546eed3..28f0aafb 100644
  }
  
  void OnDispatch(uint64_t cs_hash, ImageId depth, uint64_t depth_address, ImageId motion,
-@@ -762,13 +924,20 @@ void OnDispatch(uint64_t cs_hash, ImageId depth, uint64_t depth_address, ImageId
- void PrepareInputs(GraphicContext& graphics, TextureCache& cache, CommandBuffer& command,
+@@ -762,13 +932,20 @@ void PrepareInputs(GraphicContext& graphics, TextureCache& cache, CommandBuffer& command,
                     FrameInputs& inputs) {
  	inputs.valid = false;
 -	const bool ready = g_sources.valid && g_camera.valid;
@@ -393,7 +429,7 @@ index 6546eed3..28f0aafb 100644
  		return;
  	}
  	auto& depth  = cache.GetImage(sources.depth);
-@@ -777,6 +946,7 @@ void PrepareInputs(GraphicContext& graphics, TextureCache& cache, CommandBuffer&
+@@ -777,6 +954,7 @@ void PrepareInputs(GraphicContext& graphics, TextureCache& cache, CommandBuffer& inputs) {
  	    motion.info.data.address != sources.motion_address ||
  	    depth.backing.extent.width != motion.backing.extent.width ||
  	    depth.backing.extent.height != motion.backing.extent.height) {
@@ -401,7 +437,7 @@ index 6546eed3..28f0aafb 100644
  		return; // the images were replaced after the TAA pass
  	}
  	Configure(graphics, inputs.depth, inputs.depth_view, depth.backing);
-@@ -790,8 +960,8 @@ void PrepareInputs(GraphicContext& graphics, TextureCache& cache, CommandBuffer&
+@@ -790,8 +968,8 @@ void PrepareInputs(GraphicContext& graphics, TextureCache& cache, CommandBuffer& command,
  	}
  	inputs.render_extent = {motion.backing.extent.width, motion.backing.extent.height};
  	inputs.camera        = camera;
@@ -447,88 +483,3 @@ index 5fea5290..b4adb310 100644
  // KYTY_FPS_HUD: the panel's rectangle, normalized to the game image. Its motion vectors are
  // zeroed so generated frames keep the panel in place.
  void SetStaticRect(float x0, float y0, float x1, float y1);
-diff --git a/src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp b/src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
-index 384313a2..6e37671a 100644
---- a/src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
-+++ b/src/graphics/host_gpu/renderer/pipeline/pipelineCache.cpp
-@@ -2260,6 +2260,11 @@ PipelineCache::Pipeline* PipelineCache::CreateGraphicsPipelineImpl(
- 		const bool table = vs_input_info.stage.program != nullptr && vs_input_info.stage.program->table_mode;
- 		if (table) m_table_pipeline_jobs.fetch_add(1, std::memory_order_relaxed);
- 		(table ? TableWorkers() : Workers()).Push([this, job, table] {
-+			SlowLog::Scope async_slow([&](double ms) {
-+				std::printf("SLOW AsyncGraphicsPipeline %.1f ms VS=%" PRIu64 " PS=%" PRIu64 " table=%u\n",
-+				            ms, job->vertex_program.id, job->ps_active ? job->pixel_program.id : 0,
-+				            table ? 1u : 0u);
-+			}, SlowLog::HitchThreshold());
- 			CreatePipelineInternal(m_graphics, *job->pipeline, job->rendering, job->vertex_input,
- 			                       job->vs_input_info, job->vertex_program,
- 			                       job->ps_active ? &job->ps_input_info : nullptr, job->pixel_program,
-@@ -2406,7 +2411,11 @@ PipelineCache::Pipeline* PipelineCache::TryCreateComputePipeline(const ShaderCom
- 	job->module     = compute_program.module;
- 	m_pending_compute_pipelines.emplace(compute_program.id, job);
- 	m_table_pipeline_jobs.fetch_add(1, std::memory_order_relaxed);
--	TableWorkers().Push([this, job] { // (table dispatches' pipelines)
-+	const auto compute_shader_id = compute_program.id;
-+	TableWorkers().Push([this, job, compute_shader_id] { // (table dispatches' pipelines)
-+		SlowLog::Scope async_slow([&](double ms) {
-+			std::printf("SLOW AsyncComputePipeline %.1f ms shader=%" PRIu64 "\n", ms, compute_shader_id);
-+		}, SlowLog::HitchThreshold());
- 		CreatePipelineInternal(m_graphics, *job->pipeline, job->input_info, job->module, TablePipelineCache(),
- 		                       PipelineBuild::Full, true);
- 		TablePipelineDone();
-diff --git a/src/local/frame-gen.cpp b/src/local/frame-gen.cpp
-index 28f0aafb..4b5e21de 100644
---- a/src/local/frame-gen.cpp
-+++ b/src/local/frame-gen.cpp
-@@ -760,6 +760,8 @@ void AfterPresent(const FrameInputs* inputs) {
- 	static uint64_t sample_generated = 0;
- 	static uint64_t sample_sl_presented = 0;
- 	static uint64_t sample_state_failures = 0;
-+	static uint32_t sample_status_or = 0;
-+	static uint32_t sample_max_generated = 0;
- 	if (sample_first_guest_frame == 0 && inputs != nullptr && inputs->guest_frame != 0) {
- 		sample_first_guest_frame = inputs->guest_frame;
- 	}
-@@ -793,6 +795,8 @@ void AfterPresent(const FrameInputs* inputs) {
- 		// DLSS-G always presents the host frame; only the generated frame may be dropped.
- 		g_presented_frames.fetch_add(1, std::memory_order_relaxed);
- 	} else {
-+		sample_status_or |= static_cast<uint32_t>(state.status);
-+		sample_max_generated = std::max(sample_max_generated, state.numFramesToGenerateMax);
- 		sample_sl_presented += state.numFramesActuallyPresented;
- 		sample_generated += state.numFramesActuallyPresented > 1 ? state.numFramesActuallyPresented - 1 : 0;
- 		g_presented_frames.fetch_add(std::max(state.numFramesActuallyPresented, 1u), std::memory_order_relaxed);
-@@ -804,17 +808,19 @@ void AfterPresent(const FrameInputs* inputs) {
- 		LOGF("Frame generation sample: guest_frames=%" PRIu64 "..%" PRIu64
- 		     " presents=%" PRIu64 " valid=%" PRIu64 " no_taa=%" PRIu64 " no_camera=%" PRIu64
- 		     " replaced=%" PRIu64 " no_frame=%" PRIu64 " generated=%" PRIu64
--		     " streamline_presented=%" PRIu64 " state_failures=%" PRIu64 "\n",
-+		     " streamline_presented=%" PRIu64 " state_failures=%" PRIu64
-+		     " status_or=0x%x max_generated=%u\n",
- 		     first_guest_frame, last_guest_frame, sample_presents, sample_valid, sample_no_taa,
- 		     sample_no_camera, sample_replaced, sample_no_frame, sample_generated,
--		     sample_sl_presented, sample_state_failures);
-+		     sample_sl_presented, sample_state_failures, sample_status_or, sample_max_generated);
- 		std::printf("Frame generation sample: guest_frames=%" PRIu64 "..%" PRIu64
- 		            " presents=%" PRIu64 " valid=%" PRIu64 " no_taa=%" PRIu64 " no_camera=%" PRIu64
- 		            " replaced=%" PRIu64 " no_frame=%" PRIu64 " generated=%" PRIu64
--		            " streamline_presented=%" PRIu64 " state_failures=%" PRIu64 "\n",
-+		            " streamline_presented=%" PRIu64 " state_failures=%" PRIu64
-+		            " status_or=0x%x max_generated=%u\n",
- 		            first_guest_frame, last_guest_frame, sample_presents, sample_valid, sample_no_taa,
- 		            sample_no_camera, sample_replaced, sample_no_frame, sample_generated,
--		            sample_sl_presented, sample_state_failures);
-+		            sample_sl_presented, sample_state_failures, sample_status_or, sample_max_generated);
- 		std::fflush(stdout);
- 		sample_start = now;
- 		sample_first_guest_frame = 0;
-@@ -828,6 +834,8 @@ void AfterPresent(const FrameInputs* inputs) {
- 		sample_generated = 0;
- 		sample_sl_presented = 0;
- 		sample_state_failures = 0;
-+		sample_status_or = 0;
-+		sample_max_generated = 0;
- 	}
- 	if (presents % 600 == 1) {
- 		LOGF("frame generation: status=0x%x presented=%u max_generated=%u vram=%" PRIu64 " MiB\n",
-	
