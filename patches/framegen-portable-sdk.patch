@@ -476,7 +476,7 @@ index 384313a2..6e37671a 100644
  		CreatePipelineInternal(m_graphics, *job->pipeline, job->input_info, job->module, TablePipelineCache(),
  		                       PipelineBuild::Full, true);
  		TablePipelineDone();
- diff --git a/src/local/frame-gen.cpp b/src/local/frame-gen.cpp
+diff --git a/src/local/frame-gen.cpp b/src/local/frame-gen.cpp
 index 28f0aafb..4b5e21de 100644
 --- a/src/local/frame-gen.cpp
 +++ b/src/local/frame-gen.cpp
@@ -531,3 +531,5 @@ index 28f0aafb..4b5e21de 100644
  	}
  	if (presents % 600 == 1) {
 	
+
+ 		LOGF("frame generation: status=0x%x presented=%u max_generated=%u vram=%" PRIu64 " MiB\n",
