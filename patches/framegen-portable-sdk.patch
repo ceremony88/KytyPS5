@@ -110,7 +110,7 @@ index 29920edd..2d4384f4 100644
  		if (status != Swapchain::Status::Success) {
  			m_impl->RecoverSwapchain(status);
 diff --git a/src/local/frame-gen.cpp b/src/local/frame-gen.cpp
-index 6546eed3..4b5e21de 100644
+index 6546eed3..0dab09bd 100644
 --- a/src/local/frame-gen.cpp
 +++ b/src/local/frame-gen.cpp
 @@ -6,6 +6,7 @@
@@ -130,7 +130,12 @@ index 6546eed3..4b5e21de 100644
  std::atomic<uint64_t> g_static_rect {0};
  
  // No motion under the KYTY_FPS_HUD panel: DLSS-G would move it with the scene behind it.
-@@ -219,6 +220,19 @@ bool             g_options_set = false;
+@@ -215,10 +216,24 @@ struct Api {
+ Api              g_api;
+ sl::FrameToken*  g_token = nullptr; // present thread: the frame being presented
+ uint32_t         g_frame_index = 0;
++bool             g_history_reset_pending = true; // present thread: reset on the next usable input frame
+ bool             g_options_set = false;
  vk::Extent2D     g_options_backbuffer {};
  vk::Extent2D     g_options_render {};
  uint64_t         g_presents = 0;
@@ -150,7 +155,7 @@ index 6546eed3..4b5e21de 100644
  
  // Matrices in Streamline's convention: row-major, row vectors (p' = p * M).
  using Mat4 = sl::float4x4;
-@@ -404,8 +418,22 @@ void Initialize() {
+@@ -404,8 +419,22 @@ void Initialize() {
  	} else {
  		wchar_t exe[MAX_PATH] {};
  		GetModuleFileNameW(nullptr, exe, MAX_PATH);
@@ -175,7 +180,7 @@ index 6546eed3..4b5e21de 100644
  	}
  	const auto interposer = dir / "sl.interposer.dll";
  	if (std::getenv("KYTY_FRAMEGEN_VERBOSE") != nullptr) {
-@@ -525,6 +553,18 @@ void BeforePresent(const FrameInputs* inputs, vk::Extent2D backbuffer, vk::Rect2
+@@ -525,6 +554,18 @@ void BeforePresent(const FrameInputs* inputs, vk::Extent2D backbuffer, vk::Rect2
  	}
  	const sl::ViewportHandle viewport {0};
  	const bool               usable = inputs != nullptr && inputs->valid;
@@ -194,7 +199,25 @@ index 6546eed3..4b5e21de 100644
  	// DLSS-G options: on while frames carry inputs; sizes are hints for its allocations.
  	if (!g_options_set || (usable && (g_options_backbuffer != backbuffer ||
  	                                  g_options_render != inputs->render_extent))) {
-@@ -670,9 +710,13 @@ void BeforePresent(const FrameInputs* inputs, vk::Extent2D backbuffer, vk::Rect2
+@@ -585,7 +626,16 @@ void BeforePresent(const FrameInputs* inputs, vk::Extent2D backbuffer, vk::Rect2
+ 	constants.depthInverted       = sl::Boolean::eTrue;
+ 	constants.cameraMotionIncluded = sl::Boolean::eTrue;
+ 	constants.motionVectors3D     = sl::Boolean::eFalse;
+-	constants.reset               = usable ? sl::Boolean::eFalse : sl::Boolean::eTrue;
++	// Missing depth/motion inputs are tagged as null below. Keep presenting those frames, but
++	// defer the history reset until valid inputs resume instead of asking Streamline to reset on
++	// every consecutive input gap.
++	constants.renderingGameFrames = inputs != nullptr ? sl::Boolean::eTrue : sl::Boolean::eFalse;
++	constants.reset = usable && g_history_reset_pending ? sl::Boolean::eTrue : sl::Boolean::eFalse;
++	if (usable) {
++		g_history_reset_pending = false;
++	} else {
++		g_history_reset_pending = true;
++	}
+ 	constants.orthographicProjection = sl::Boolean::eFalse;
+ 	constants.motionVectorsDilated   = sl::Boolean::eFalse;
+ 	constants.motionVectorsJittered  = sl::Boolean::eFalse;
+@@ -670,9 +720,13 @@ void BeforePresent(const FrameInputs* inputs, vk::Extent2D backbuffer, vk::Rect2
  		    sl::ResourceTag(nullptr, sl::kBufferTypeBackbuffer, sl::ResourceLifecycle::eValidUntilPresent,
  		                    &game),
  		};
@@ -211,7 +234,7 @@ index 6546eed3..4b5e21de 100644
  		}
  	} else {
  		// Menus, movies, loading: no valid depth and motion (DLSS-G then presents the frame as is).
-@@ -680,7 +724,12 @@ void BeforePresent(const FrameInputs* inputs, vk::Extent2D backbuffer, vk::Rect2
+@@ -680,7 +734,12 @@ void BeforePresent(const FrameInputs* inputs, vk::Extent2D backbuffer, vk::Rect2
  		    sl::ResourceTag(nullptr, sl::kBufferTypeDepth, sl::ResourceLifecycle::eValidUntilPresent),
  		    sl::ResourceTag(nullptr, sl::kBufferTypeMotionVectors, sl::ResourceLifecycle::eValidUntilPresent),
  		};
@@ -225,7 +248,7 @@ index 6546eed3..4b5e21de 100644
  	}
  	g_api.pcl_set_marker(sl::PCLMarker::eRenderSubmitEnd, token);
  	g_api.pcl_set_marker(sl::PCLMarker::ePresentStart, token);
-@@ -693,21 +742,101 @@ void BeforePresent(const FrameInputs* inputs, vk::Extent2D backbuffer, vk::Rect2
+@@ -693,21 +752,101 @@ void BeforePresent(const FrameInputs* inputs, vk::Extent2D backbuffer, vk::Rect2
  #endif
  }
  
@@ -333,7 +356,7 @@ index 6546eed3..4b5e21de 100644
  	if (presents % 600 == 1) {
  		LOGF("frame generation: status=0x%x presented=%u max_generated=%u vram=%" PRIu64 " MiB\n",
  		     static_cast<uint32_t>(state.status), state.numFramesActuallyPresented,
-@@ -715,12 +844,44 @@ void AfterPresent() {
+@@ -715,12 +854,44 @@ void AfterPresent() {
  		std::printf("Frame generation: status=0x%x presented=%u max_generated=%u\n",
  		            static_cast<uint32_t>(state.status), state.numFramesActuallyPresented,
  		            state.numFramesToGenerateMax);
@@ -379,7 +402,7 @@ index 6546eed3..4b5e21de 100644
  	return g_presented_frames.load(std::memory_order_relaxed);
  }
  
-@@ -732,9 +893,17 @@ void SetStaticRect(float x0, float y0, float x1, float y1) {
+@@ -732,9 +903,17 @@ void SetStaticRect(float x0, float y0, float x1, float y1) {
  }
  
  void OnDraw(uint64_t vs_hash, std::span<const uint32_t> srt) {
@@ -400,7 +423,7 @@ index 6546eed3..4b5e21de 100644
  		return;
  	}
  	for (uint32_t i = 0; i < 16; ++i) {
-@@ -749,6 +918,7 @@ void OnDraw(uint64_t vs_hash, std::span<const uint32_t> srt) {
+@@ -749,6 +928,7 @@ void OnDraw(uint64_t vs_hash, std::span<const uint32_t> srt) {
  	}
  	g_camera.jitter_ndc = {AsFloat(srt[SrtJitter]), AsFloat(srt[SrtJitter + 1])};
  	g_camera.valid      = true;
@@ -408,7 +431,7 @@ index 6546eed3..4b5e21de 100644
  }
  
  void OnDispatch(uint64_t cs_hash, ImageId depth, uint64_t depth_address, ImageId motion,
-@@ -762,13 +932,20 @@ void OnDispatch(uint64_t cs_hash, ImageId depth, uint64_t depth_address, ImageId
+@@ -762,13 +942,20 @@ void OnDispatch(uint64_t cs_hash, ImageId depth, uint64_t depth_address, ImageId
  void PrepareInputs(GraphicContext& graphics, TextureCache& cache, CommandBuffer& command,
                     FrameInputs& inputs) {
  	inputs.valid = false;
@@ -430,7 +453,7 @@ index 6546eed3..4b5e21de 100644
  		return;
  	}
  	auto& depth  = cache.GetImage(sources.depth);
-@@ -777,6 +954,7 @@ void PrepareInputs(GraphicContext& graphics, TextureCache& cache, CommandBuffer&
+@@ -777,6 +964,7 @@ void PrepareInputs(GraphicContext& graphics, TextureCache& cache, CommandBuffer&
  	    motion.info.data.address != sources.motion_address ||
  	    depth.backing.extent.width != motion.backing.extent.width ||
  	    depth.backing.extent.height != motion.backing.extent.height) {
@@ -438,7 +461,7 @@ index 6546eed3..4b5e21de 100644
  		return; // the images were replaced after the TAA pass
  	}
  	Configure(graphics, inputs.depth, inputs.depth_view, depth.backing);
-@@ -790,8 +968,8 @@ void PrepareInputs(GraphicContext& graphics, TextureCache& cache, CommandBuffer&
+@@ -790,8 +978,8 @@ void PrepareInputs(GraphicContext& graphics, TextureCache& cache, CommandBuffer&
  	}
  	inputs.render_extent = {motion.backing.extent.width, motion.backing.extent.height};
  	inputs.camera        = camera;
