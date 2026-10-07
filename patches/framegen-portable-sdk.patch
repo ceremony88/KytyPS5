@@ -226,7 +226,7 @@ index 6546eed3..4b5e21de 100644
  	}
  	g_api.pcl_set_marker(sl::PCLMarker::eRenderSubmitEnd, token);
  	g_api.pcl_set_marker(sl::PCLMarker::ePresentStart, token);
-@@ -693,21 +742,93 @@ void BeforePresent(const FrameInputs* inputs, vk::Extent2D backbuffer, vk::Rect2
+@@ -693,21 +742,101 @@ void BeforePresent(const FrameInputs* inputs, vk::Extent2D backbuffer, vk::Rect2
  #endif
  }
  
